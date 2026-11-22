@@ -1,0 +1,81 @@
+export type DenialCategory =
+  | "medical_necessity"
+  | "level_of_care"
+  | "out_of_network"
+  | "not_covered"
+  | "missing_info"
+  | "step_therapy"
+  | "experimental"
+  | "other";
+
+export const DENIAL_CATEGORIES: DenialCategory[] = [
+  "medical_necessity",
+  "level_of_care",
+  "out_of_network",
+  "not_covered",
+  "missing_info",
+  "step_therapy",
+  "experimental",
+  "other",
+];
+
+/** Part B drugs have shorter plan decision clocks than other items/services. */
+export type RequestType = "service" | "part_b_drug";
+
+export interface DenialAnalysis {
+  category: DenialCategory;
+  confidence: "high" | "medium" | "low";
+  /** Does this look like a Medicare Advantage pre-service (prior auth) denial? */
+  inScope: boolean;
+  requestType: RequestType;
+  planName: string;
+  memberName: string;
+  memberId: string;
+  referenceNumber: string;
+  serviceDenied: string;
+  providerName: string;
+  /** ISO yyyy-mm-dd, or "" if it could not be read. */
+  noticeDate: string;
+  /** The plan's own stated reason, briefly. */
+  statedReason: string;
+  /** Plain-language explanation written for a non-expert. */
+  plainSummary: string;
+  appealAddress: string;
+  appealFax: string;
+  appealPhone: string;
+  warnings: string[];
+  /** "ai" when a model read the letter, "rules" for the offline keyword reader. */
+  source: "ai" | "rules";
+}
+
+export interface UserFacts {
+  /** Who signs the letter. */
+  signer: "patient" | "representative";
+  patientName: string;
+  representativeName: string;
+  mailingAddress: string;
+  phone: string;
+  doctorName: string;
+  doctorSupports: boolean;
+  whyNeeded: string;
+  whatTried: string;
+  harmIfDelayed: string;
+  expedited: boolean;
+  /** Only used when the 65-day window has passed. */
+  lateReason: string;
+}
+
+export const EMPTY_FACTS: UserFacts = {
+  signer: "patient",
+  patientName: "",
+  representativeName: "",
+  mailingAddress: "",
+  phone: "",
+  doctorName: "",
+  doctorSupports: false,
+  whyNeeded: "",
+  whatTried: "",
+  harmIfDelayed: "",
+  expedited: false,
+  lateReason: "",
+};

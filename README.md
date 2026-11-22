@@ -1,36 +1,71 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Overturned
 
-## Getting Started
+Turn a Medicare Advantage denial letter into a plain-language explanation, a first-draft appeal letter and a deadline.
+An information and drafting aid. Not legal or medical advice.
 
-First, run the development server:
+## What v1 does
+
+Scope: Medicare Advantage **prior-authorization (pre-service) denials** only.
+
+1. **Capture**: paste the letter, or photograph it (the model reads the photo; no separate OCR service).
+2. **Explain**: classifies the denial into one of eight types and explains it in plain language. The user confirms every extracted detail.
+3. **Your side**: a short form for the facts, who signs, doctor support, and whether to ask for a fast appeal.
+4. **Draft**: a reconsideration letter built from a fixed template plus the user's facts. Missing facts become `[LOUD BLANKS]`.
+5. **Send and track**: filing deadline, calendar file with reminders, a checklist, the plan's decision date, and the five appeal levels.
+
+PDF export and the calendar file are generated in the browser.
+
+## Run it
 
 ```bash
+npm install
+cp .env.example .env.local   # add ANTHROPIC_API_KEY
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+`npm test` runs the unit tests, `npm run lint` and `npm run build` should both pass before deploying.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+Deploy: import the repo into Vercel and set `ANTHROPIC_API_KEY`. No database or other services.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+### Offline mode
 
-## Learn More
+With no `ANTHROPIC_API_KEY`, the app still works end to end with a keyword reader and template-only letters
+(photo reading is disabled). The same path is the fallback when a model call fails.
 
-To learn more about Next.js, take a look at the following resources:
+## How it is put together
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+| Path | Role |
+| --- | --- |
+| `src/lib/rules.ts` | Every federal deadline and threshold, with its source and the date it was verified |
+| `src/lib/deadlines.ts` | Calendar-exact date maths, filing deadline, appeal stages |
+| `src/lib/categories.ts` | The eight denial types: explanation, evidence checklist, argument paragraphs, keyword signals |
+| `src/lib/classify.ts` | Offline keyword reader and field extraction |
+| `src/lib/llm.ts` | Model calls (structured output via a forced tool), output coercion, citation guard |
+| `src/lib/letter.ts` | The letter template |
+| `src/lib/export.ts` | PDF, calendar file, photo downscaling |
+| `src/app/api/*` | `analyze` and `draft` routes |
+| `src/components/Flow.tsx` | The five-step mobile flow |
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Safety design
 
-## Deploy on Vercel
+- **Deadlines are code, not model output.** The model never computes a date.
+- **The model cannot introduce legal authority.** Drafts citing any regulation outside our own reviewed templates are discarded and the template is used.
+- **The model is told not to invent facts**, and to leave bracketed blanks instead. The user is told to read every line.
+- **Letter text is treated as untrusted input** in both prompts.
+- **Nothing is stored server-side.** Progress lives in the browser's localStorage and can be erased. Letter text is sent to the model API for processing; only error messages are logged.
+- Every screen that shows a deadline tells the user to confirm it on their own notice.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Keeping the rules current
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+`src/lib/rules.ts` was last verified on the date in `RULES_VERIFIED_ON`. Re-check it against the linked CMS and Medicare.gov
+pages at least every January: the amount-in-controversy thresholds change yearly, and CMS revises timeframes by regulation
+(the filing window moved from 60 to 65 days in 2025).
+
+## Not built yet
+
+- Payments and the free/paid split
+- Rate limiting and abuse protection on the two API routes (needed before public launch)
+- Multi-page photo capture
+- Email or text reminders (v1 uses a calendar file, which needs no backend)
+- A privacy policy and terms, and a legal review of the template language and of health-data obligations
+- Other denial types: payment denials, Part D, Original Medicare, commercial plans
