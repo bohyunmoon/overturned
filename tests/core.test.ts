@@ -3,10 +3,14 @@ import { test } from "node:test";
 import { classifyByRules, findDates, findNoticeDate } from "../src/lib/classify";
 import { addDays, daysBetween, filingDeadline, parseIso, planDecisionDue, planDecisionWindow } from "../src/lib/deadlines";
 import { buildDeadlineIcs } from "../src/lib/export";
+import { categoryText } from "../src/lib/categories.ko";
+import { applyTranslations, dropKoreanNames, koreanFields } from "../src/lib/korean";
 import { buildLetter } from "../src/lib/letter";
 import { citesOnlyAllowed, coerceAnalysis } from "../src/lib/llm";
 import { SAMPLE_LETTER } from "../src/lib/sample";
-import { EMPTY_FACTS } from "../src/lib/types";
+import { DENIAL_CATEGORIES, EMPTY_FACTS, hasHangul } from "../src/lib/types";
+import { CATEGORIES } from "../src/lib/categories";
+import { appealStages, formatLong } from "../src/lib/deadlines";
 
 test("date maths is calendar-exact across months, years and leap days", () => {
   assert.equal(addDays("2026-10-28", 65), "2027-01-01");
@@ -61,7 +65,7 @@ test("offline reader flags out-of-scope letters and classifies common reasons", 
   const eob = classifyByRules("Explanation of Benefits. Your claim was denied. Amount billed $400. The service is not a covered benefit under your plan.");
   assert.equal(eob.inScope, false);
   assert.equal(eob.category, "not_covered");
-  assert.ok(eob.warnings.length >= 2);
+  assert.deepEqual(eob.warnings, ["code:not_ma", "code:payment", "code:no_date"]);
   assert.equal(classifyByRules("Medicare Advantage. You must first try the preferred drug under our step therapy rules.").category, "step_therapy");
   assert.equal(classifyByRules("Medicare Advantage. The provider is out-of-network.").category, "out_of_network");
   assert.equal(classifyByRules("Medicare Advantage notice with nothing recognisable in it at all.").category, "other");
@@ -105,9 +109,67 @@ test("model output is coerced and uncited authority is rejected", () => {
 });
 
 test("calendar file is a valid all-day event on the deadline", () => {
-  const ics = buildDeadlineIcs("2027-01-01", "Example Plan", "rehab; inpatient");
+  const ics = buildDeadlineIcs("2027-01-01", { summary: "마감일", description: "rehab; inpatient", alarm: (d) => `${d}일 전` });
+  assert.match(ics, /SUMMARY:마감일/);
+  assert.match(ics, /DESCRIPTION:21일 전/);
   assert.match(ics, /DTSTART;VALUE=DATE:20270101\r\n/);
   assert.match(ics, /DTEND;VALUE=DATE:20270102\r\n/);
   assert.match(ics, /rehab\\; inpatient/);
   assert.equal((ics.match(/BEGIN:VALARM/g) ?? []).length, 3);
+});
+
+test("Korean explanations cover every category and every appeal stage", () => {
+  for (const c of DENIAL_CATEGORIES) {
+    const ko = categoryText(c, "ko");
+    const en = categoryText(c, "en");
+    assert.ok(hasHangul(ko.label) && hasHangul(ko.meaning) && hasHangul(ko.whatHelps), c);
+    assert.equal(ko.evidence.length, en.evidence.length, `${c} evidence list`);
+    assert.equal(en.meaning, CATEGORIES[c].meaning);
+  }
+  const en = appealStages("service", false);
+  const ko = appealStages("service", false, "ko");
+  assert.equal(ko.length, en.length);
+  ko.forEach((s, i) => {
+    assert.ok(hasHangul(s.name) && hasHangul(s.timing) && hasHangul(s.note));
+    assert.equal(s.youMustFile, en[i].youMustFile);
+  });
+  // The same numbers appear in both languages.
+  assert.match(ko[0].timing, /65일.*30일/);
+  assert.match(appealStages("part_b_drug", false, "ko")[0].timing, /7일/);
+  assert.match(appealStages("service", true, "ko")[1].timing, /72시간/);
+  assert.match(ko[2].note, /\$200/);
+  assert.match(ko[4].note, /\$1,960/);
+  assert.equal(formatLong("2027-01-01", "ko"), "2027년 1월 1일 금요일");
+});
+
+test("Korean answers are found for translation; names and addresses are not translated", () => {
+  const analysis = { ...classifyByRules(SAMPLE_LETTER), serviceDenied: "고관절 수술 후 입원 재활" };
+  const facts = {
+    ...EMPTY_FACTS,
+    patientName: "김영희",
+    doctorName: "Dr. Alan Example",
+    mailingAddress: "서울시 12 Sample Lane",
+    whyNeeded: "어머니는 혼자 사시고 아직 걷지 못하십니다.",
+    whatTried: "Home exercises for one week.",
+  };
+  assert.deepEqual(Object.keys(koreanFields(analysis, facts)).sort(), ["serviceDenied", "whyNeeded"]);
+
+  const named = dropKoreanNames(analysis, facts);
+  assert.equal(named.dropped, true);
+  assert.equal(named.facts.patientName, "");
+  assert.equal(named.facts.doctorName, "Dr. Alan Example");
+  assert.equal(named.facts.mailingAddress, "서울시 12 Sample Lane");
+  assert.equal(named.analysis.memberName, "Margaret Sample");
+
+  const done = applyTranslations(named.analysis, named.facts, {
+    whyNeeded: "My mother lives alone and cannot walk yet.",
+    serviceDenied: "Inpatient rehabilitation after hip surgery",
+  });
+  const letter = buildLetter({ ...done, today: "2026-11-22" });
+  assert.match(letter, /My mother lives alone and cannot walk yet\./);
+  assert.match(letter, /Service denied: Inpatient rehabilitation after hip surgery/);
+  assert.match(letter, /Enrollee: Margaret Sample/); // falls back to the name on the notice
+  assert.match(letter, /서울시 12 Sample Lane/); // address left exactly as typed
+  assert.equal(hasHangul(letter.replace("서울시 12 Sample Lane", "")), false);
+  assert.equal(dropKoreanNames(analysis, EMPTY_FACTS).dropped, false);
 });

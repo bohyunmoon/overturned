@@ -28,6 +28,10 @@ export const SOURCES = {
     label: "CMS: Part C appeals process flowchart (April 2026)",
     url: "https://www.hhs.gov/guidance/sites/default/files/hhs-guidance-documents/CMS/medicare-part-c-medicareadvantage-flowchart-042026v508.pdf",
   },
+  otherLanguages: {
+    label: "Medicare.gov: Get Medicare information in other languages",
+    url: "https://www.medicare.gov/about-us/other-languages",
+  },
   ship: {
     label: "Find free local Medicare counseling (SHIP)",
     url: "https://www.shiphelp.org/",

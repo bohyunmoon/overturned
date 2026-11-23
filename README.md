@@ -15,6 +15,22 @@ Scope: Medicare Advantage **prior-authorization (pre-service) denials** only.
 
 PDF export and the calendar file are generated in the browser.
 
+## Languages
+
+A toggle in the header switches the whole interface between English and Korean. The choice is remembered on the device,
+and a browser set to Korean starts in Korean.
+
+- **Always English:** the denial notice the user pastes or photographs, and the appeal letter. The plan writes and reads English.
+- **Translated:** every label, instruction, warning, deadline, checklist and appeal-stage description, plus the AI explanation of the letter.
+- **Korean answers:** free-text answers written in Korean are translated into English by the model when the draft is written.
+- **Names** are never translated or romanized, because they must match the plan's records. A name typed in Korean becomes a blank in the letter.
+- **Addresses** are left exactly as typed.
+
+Translation needs the model. With no API key, Korean answers stay as typed and the letter screen says so.
+
+Interface text lives in `src/lib/i18n.tsx` and `src/lib/categories.ko.ts`. The Korean object is typed against the English one,
+so a missing string fails the build. The Korean copy has not been reviewed by a native-speaking Medicare counselor; do that before launch.
+
 ## Run it
 
 ```bash
@@ -42,8 +58,10 @@ With no `ANTHROPIC_API_KEY`, the app still works end to end with a keyword reade
 | `src/lib/classify.ts` | Offline keyword reader and field extraction |
 | `src/lib/llm.ts` | Model calls (structured output via a forced tool), output coercion, citation guard |
 | `src/lib/letter.ts` | The letter template |
+| `src/lib/i18n.tsx`, `src/lib/categories.ko.ts` | Interface text in English and Korean |
+| `src/lib/korean.ts` | Decides what gets translated into English for the letter |
 | `src/lib/export.ts` | PDF, calendar file, photo downscaling |
-| `src/app/api/*` | `analyze` and `draft` routes |
+| `src/app/api/*` | `analyze`, `draft` and `translate` routes |
 | `src/components/Flow.tsx` | The five-step mobile flow |
 
 ## Safety design
@@ -64,7 +82,7 @@ pages at least every January: the amount-in-controversy thresholds change yearly
 ## Not built yet
 
 - Payments and the free/paid split
-- Rate limiting and abuse protection on the two API routes (needed before public launch)
+- Rate limiting and abuse protection on the three API routes (needed before public launch)
 - Multi-page photo capture
 - Email or text reminders (v1 uses a calendar file, which needs no backend)
 - A privacy policy and terms, and a legal review of the template language and of health-data obligations

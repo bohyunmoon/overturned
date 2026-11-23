@@ -4,7 +4,7 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "Overturned: appeal a Medicare Advantage denial",
   description:
-    "Paste or photograph a Medicare Advantage denial letter. Get a plain-language explanation, a first-draft appeal letter and your deadline. Not legal or medical advice.",
+    "Paste or photograph a Medicare Advantage denial letter. Get a plain-language explanation, a first-draft appeal letter and your deadline, in English or Korean (한국어). Not legal or medical advice.",
 };
 
 export const viewport: Viewport = {

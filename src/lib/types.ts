@@ -1,3 +1,10 @@
+export type Locale = "en" | "ko";
+
+/** True when the text contains Korean (Hangul) characters. */
+export function hasHangul(text: string): boolean {
+  return /[\u1100-\u11FF\u3130-\u318F\uAC00-\uD7A3]/.test(text);
+}
+
 export type DenialCategory =
   | "medical_necessity"
   | "level_of_care"
@@ -38,11 +45,17 @@ export interface DenialAnalysis {
   noticeDate: string;
   /** The plan's own stated reason, briefly. */
   statedReason: string;
-  /** Plain-language explanation written for a non-expert. */
+  /** Plain-language explanation written for a non-expert, in `lang`. */
   plainSummary: string;
+  /** Language plainSummary and warnings were written in. */
+  lang: Locale;
   appealAddress: string;
   appealFax: string;
   appealPhone: string;
+  /**
+   * Things to double check. The offline reader emits codes ("code:not_ma")
+   * that the interface translates; the model writes sentences in `lang`.
+   */
   warnings: string[];
   /** "ai" when a model read the letter, "rules" for the offline keyword reader. */
   source: "ai" | "rules";

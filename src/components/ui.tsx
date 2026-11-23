@@ -43,10 +43,13 @@ export function Button({
 export function Field({
   label,
   hint,
+  warning,
   children,
 }: {
   label: string;
   hint?: string;
+  /** Shown under the input when something about the entry needs attention. */
+  warning?: string;
   children: ReactNode;
 }) {
   return (
@@ -54,6 +57,11 @@ export function Field({
       <span className="block font-semibold">{label}</span>
       {hint && <span className="mb-1 block text-sm text-muted">{hint}</span>}
       <span className="mt-1 block">{children}</span>
+      {warning && (
+        <span role="status" className="mt-1.5 block rounded-md bg-amber-wash px-3 py-2 text-sm font-medium text-amber">
+          {warning}
+        </span>
+      )}
     </label>
   );
 }

@@ -13,8 +13,8 @@
   --color-amber-wash: #fbefcf;
   --color-stamp-wash: #f8e2dc;
   --color-pine-wash: #e2efe9;
-  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-  --font-serif: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", sans-serif;
+  --font-serif: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, "AppleMyungjo", "Batang", "Noto Serif KR", serif;
   --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 }
 
@@ -29,6 +29,12 @@ body {
   color: var(--color-ink);
   font-family: var(--font-sans);
   line-height: 1.55;
+}
+
+/* Korean wraps between words, not in the middle of them. */
+:lang(ko) {
+  word-break: keep-all;
+  overflow-wrap: break-word;
 }
 
 :focus-visible {
@@ -51,6 +57,7 @@ body {
 
 .stamp {
   display: inline-block;
+  white-space: nowrap;
   border: 3px solid var(--color-stamp);
   color: var(--color-stamp);
   font-family: var(--font-serif);

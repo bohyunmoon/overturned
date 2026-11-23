@@ -86,17 +86,17 @@ export function classifyByRules(text: string): DenialAnalysis {
 
   const warnings: string[] = [];
   if (!looksMedicareAdvantage) {
-    warnings.push("This does not clearly read as a Medicare Advantage denial notice. The deadlines here only apply to Medicare Advantage (Part C) plans.");
+    warnings.push("code:not_ma");
   }
   if (looksPayment) {
-    warnings.push("This may be a denial of payment for care already received. Payment appeals follow a different timeline (the plan has 60 days to decide).");
+    warnings.push("code:payment");
   }
   if (looksPartD && !looksMedicareAdvantage) {
-    warnings.push("This may be a Part D prescription drug denial, which has its own appeal process.");
+    warnings.push("code:part_d");
   }
 
   const noticeDate = findNoticeDate(text);
-  if (!noticeDate) warnings.push("We could not find the date on the notice. Enter it yourself; the deadline is counted from that date.");
+  if (!noticeDate) warnings.push("code:no_date");
 
   const statedReason = wholeSentences(grab(
     text,
@@ -118,6 +118,7 @@ export function classifyByRules(text: string): DenialAnalysis {
     noticeDate,
     statedReason,
     plainSummary: CATEGORIES[category].meaning,
+    lang: "en",
     appealAddress: "",
     appealFax: grab(text, /fax(?:\s+(?:number|no\.?))?\s*[:\-]?\s*(\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4})/i),
     appealPhone: grab(text, /(?:call\s+(?:us\s+)?(?:at\s+)?|phone(?:\s+(?:number|no\.?))?\s*[:\-]?\s*)(1?[\s.-]?\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4})/i),

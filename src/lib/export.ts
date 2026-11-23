@@ -1,4 +1,4 @@
-import { addDays, formatLong } from "./deadlines";
+import { addDays } from "./deadlines";
 
 /** Lay the letter out as a US Letter PDF, 1-inch margins, ready to print and sign. */
 export async function downloadLetterPdf(letter: string, filename = "appeal-letter.pdf"): Promise<void> {
@@ -42,11 +42,12 @@ const icsDate = (iso: string) => iso.replaceAll("-", "");
 const icsEscape = (s: string) => s.replace(/\\/g, "\\\\").replace(/\n/g, "\\n").replace(/([,;])/g, "\\$1");
 
 /** An all-day calendar event on the filing deadline, with reminders before it. */
-export function buildDeadlineIcs(fileBy: string, planName: string, service: string): string {
+export function buildDeadlineIcs(
+  fileBy: string,
+  text: { summary: string; description: string; alarm: (days: number) => string },
+): string {
   const stamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d+/, "");
-  const summary = `Appeal deadline: ${planName || "Medicare Advantage plan"} must RECEIVE the appeal`;
-  const description = `Last day for the plan to receive the appeal of the denial of ${service || "the requested care"}: ${formatLong(fileBy)}. Send it well before this date and keep proof of delivery. Confirm the deadline against the denial notice.`;
-  const alarm = (days: number) => ["BEGIN:VALARM", "ACTION:DISPLAY", `DESCRIPTION:${icsEscape(`Appeal deadline in ${days} days`)}`, `TRIGGER:-P${days}D`, "END:VALARM"];
+  const alarm = (days: number) => ["BEGIN:VALARM", "ACTION:DISPLAY", `DESCRIPTION:${icsEscape(text.alarm(days))}`, `TRIGGER:-P${days}D`, "END:VALARM"];
   return [
     "BEGIN:VCALENDAR",
     "VERSION:2.0",
@@ -56,8 +57,8 @@ export function buildDeadlineIcs(fileBy: string, planName: string, service: stri
     `DTSTAMP:${stamp}`,
     `DTSTART;VALUE=DATE:${icsDate(fileBy)}`,
     `DTEND;VALUE=DATE:${icsDate(addDays(fileBy, 1))}`,
-    `SUMMARY:${icsEscape(summary)}`,
-    `DESCRIPTION:${icsEscape(description)}`,
+    `SUMMARY:${icsEscape(text.summary)}`,
+    `DESCRIPTION:${icsEscape(text.description)}`,
     ...alarm(21),
     ...alarm(10),
     ...alarm(3),
