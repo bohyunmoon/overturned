@@ -24,6 +24,67 @@ function client(): Anthropic {
   });
 }
 
+/** Which request form last succeeded; reported by the health check. */
+let lastToolMode: "strict" | "basic" | undefined;
+
+interface ToolDef {
+  name: string;
+  description: string;
+  input_schema: { type: "object"; properties: Record<string, unknown>; required: string[]; additionalProperties: false };
+}
+
+/**
+ * Ask the model for a structured answer by having it call one tool.
+ *
+ * Current models reject forced tool choice (tool_choice "tool" or "any"), so
+ * the tool is offered with tool_choice "auto" and marked strict, which
+ * guarantees that a call matches the schema, and the prompt tells the model
+ * to answer only by calling it. Thinking is on by default on these models;
+ * low effort and "between_tools" keep these short, well-specified jobs fast.
+ *
+ * If the API rejects any of the newer fields, the request is retried once in
+ * a plainer form so an API change degrades speed rather than breaking the app.
+ */
+export async function callTool(opts: {
+  tool: ToolDef;
+  system: string;
+  content: Anthropic.MessageParam["content"];
+  maxTokens: number;
+}): Promise<{ input: Record<string, unknown>; mode: "strict" | "basic" }> {
+  const base = {
+    model: MODEL,
+    max_tokens: opts.maxTokens,
+    system: `${opts.system}\n\nAnswer only by calling the ${opts.tool.name} tool, exactly once. Do not answer in plain text.`,
+    messages: [{ role: "user" as const, content: opts.content }],
+    tool_choice: { type: "auto" as const },
+  };
+  const variants = [
+    {
+      mode: "strict" as const,
+      extra: { tools: [{ ...opts.tool, strict: true }], output_config: { effort: "low" }, thinking: { type: "between_tools" } },
+    },
+    { mode: "basic" as const, extra: { tools: [opts.tool] } },
+  ];
+  let lastError: unknown;
+  for (const v of variants) {
+    try {
+      const res = await client().messages.create({ ...base, ...v.extra } as Anthropic.MessageCreateParamsNonStreaming);
+      const block = res.content.find((b) => b.type === "tool_use" && b.name === opts.tool.name);
+      if (block && block.type === "tool_use") {
+        lastToolMode = v.mode;
+        return { input: block.input as Record<string, unknown>, mode: v.mode };
+      }
+      lastError = new Error(`Model answered without calling ${opts.tool.name} (stop_reason: ${res.stop_reason})`);
+    } catch (err) {
+      lastError = err;
+      // Only a rejected request shape is worth retrying in the plainer form.
+      if ((err as { status?: number })?.status !== 400 || classifyModelError(err) !== "other") break;
+      console.error(`callTool(${opts.tool.name}) ${v.mode} form rejected:`, err instanceof Error ? err.message : err);
+    }
+  }
+  throw lastError;
+}
+
 export type ImageMediaType = "image/jpeg" | "image/png" | "image/webp";
 
 export interface LetterSource {
@@ -50,7 +111,12 @@ const RECORD_TOOL = {
   description: "Record what the denial notice says.",
   input_schema: {
     type: "object" as const,
-    required: ["category", "confidence", "inScope", "requestType", "plainSummary", "statedReason", "noticeDate", "warnings"],
+    additionalProperties: false as const,
+    required: [
+      "category", "confidence", "inScope", "requestType", "planName", "memberName", "memberId", "referenceNumber",
+      "serviceDenied", "providerName", "noticeDate", "statedReason", "plainSummary", "appealAddress", "appealFax",
+      "appealPhone", "warnings",
+    ],
     properties: {
       category: {
         type: "string" as const,
@@ -122,17 +188,13 @@ export async function analyzeWithModel(source: LetterSource, locale: Locale = "e
     content.push({ type: "text", text: `<denial_notice>\n${source.text ?? ""}\n</denial_notice>\n\nRecord what this notice says.` });
   }
 
-  const res = await client().messages.create({
-    model: MODEL,
-    max_tokens: 1500,
+  const { input } = await callTool({
+    tool: RECORD_TOOL,
     system: locale === "ko" ? ANALYZE_SYSTEM + KOREAN_READER : ANALYZE_SYSTEM,
-    tools: [RECORD_TOOL],
-    tool_choice: { type: "tool", name: RECORD_TOOL.name },
-    messages: [{ role: "user", content }],
+    content,
+    maxTokens: 6000,
   });
-  const block = res.content.find((b) => b.type === "tool_use");
-  if (!block || block.type !== "tool_use") throw new Error("Model returned no structured result");
-  return coerceAnalysis({ ...(block.input as Record<string, unknown>), lang: locale });
+  return coerceAnalysis({ ...input, lang: locale });
 }
 
 const DRAFT_SYSTEM = `You help write the argument section of a Medicare Advantage reconsideration (appeal) letter that an enrollee or their family caregiver will sign and send. A fixed template supplies the header, the request, and the closing; you write only the argument paragraphs that go in between.
@@ -152,8 +214,9 @@ const ARGS_TOOL = {
   description: "Record the argument paragraphs.",
   input_schema: {
     type: "object" as const,
+    additionalProperties: false as const,
     required: ["paragraphs"],
-    properties: { paragraphs: { type: "array" as const, items: str, minItems: 2, maxItems: 4 } },
+    properties: { paragraphs: { type: "array" as const, items: str, description: "Two to four paragraphs." } },
   },
 };
 
@@ -196,17 +259,8 @@ ${CATEGORIES[analysis.category].arguments.join("\n\n")}
 
 Write the argument paragraphs.`;
 
-  const res = await client().messages.create({
-    model: MODEL,
-    max_tokens: 1500,
-    system: DRAFT_SYSTEM,
-    tools: [ARGS_TOOL],
-    tool_choice: { type: "tool", name: ARGS_TOOL.name },
-    messages: [{ role: "user", content: user }],
-  });
-  const block = res.content.find((b) => b.type === "tool_use");
-  if (!block || block.type !== "tool_use") throw new Error("Model returned no structured result");
-  const raw = (block.input as { paragraphs?: unknown }).paragraphs;
+  const { input } = await callTool({ tool: ARGS_TOOL, system: DRAFT_SYSTEM, content: user, maxTokens: 6000 });
+  const raw = input.paragraphs;
   const paragraphs = Array.isArray(raw) ? raw.map((x) => s(x, 1600)).filter(Boolean).slice(0, 4) : [];
   if (paragraphs.length < 2) throw new Error("Model returned too few paragraphs");
   if (!citesOnlyAllowed(paragraphs, analysis.category)) throw new Error("Model cited authority outside the reference set");
@@ -249,21 +303,17 @@ export async function translateFields<K extends string>(fields: Record<K, string
     description: "Record the translation of each field.",
     input_schema: {
       type: "object" as const,
+      additionalProperties: false as const,
       required: keys as string[],
       properties: Object.fromEntries(keys.map((k) => [k, str])),
     },
   };
-  const res = await client().messages.create({
-    model: MODEL,
-    max_tokens: 3000,
+  const { input } = await callTool({
+    tool,
     system: target === "en" ? TO_ENGLISH : TO_KOREAN,
-    tools: [tool],
-    tool_choice: { type: "tool", name: tool.name },
-    messages: [{ role: "user", content: `<fields>\n${JSON.stringify(Object.fromEntries(keys.map((k) => [k, fields[k]])), null, 2)}\n</fields>` }],
+    content: `<fields>\n${JSON.stringify(Object.fromEntries(keys.map((k) => [k, fields[k]])), null, 2)}\n</fields>`,
+    maxTokens: 8000,
   });
-  const block = res.content.find((b) => b.type === "tool_use");
-  if (!block || block.type !== "tool_use") throw new Error("Model returned no translation");
-  const input = block.input as Record<string, unknown>;
   for (const k of keys) {
     const v = s(input[k], 6000);
     if (!v || (target === "en" && hasHangul(v))) continue;
@@ -320,6 +370,11 @@ export interface ModelCheck {
   model: string;
   /** Facts about the key's shape. Never the key itself. */
   key: { present: boolean; looksLikeApiKey: boolean; hadStraySpaces: boolean; workspaceIdSet: boolean };
+  /**
+   * Whether a structured request (the kind every feature uses) works, and in
+   * which form: "strict" is the intended one, "basic" the fallback.
+   */
+  structured?: "strict" | "basic" | "failed";
   /** Present only on failure. */
   httpStatus?: number;
   errorType?: string;
@@ -343,7 +398,6 @@ export async function checkModel(): Promise<ModelCheck> {
   if (!key.present) return { status: "no_key", model: MODEL, key };
   try {
     await client().messages.create({ model: MODEL, max_tokens: 1, messages: [{ role: "user", content: "ok" }] });
-    return { status: "ok", model: MODEL, key };
   } catch (err) {
     const e = err as { status?: number; name?: string; error?: { error?: { type?: string } }; message?: string };
     console.error("model check failed:", e.message ?? err);
@@ -351,6 +405,24 @@ export async function checkModel(): Promise<ModelCheck> {
       status: classifyModelError(err),
       model: MODEL,
       key,
+      httpStatus: e.status,
+      errorType: e.error?.error?.type ?? e.name,
+      detail: safeDetail(e.message ?? String(err)),
+    };
+  }
+  // The key works. Now the real thing: translate one word through the same path the app uses.
+  try {
+    const out = await translateFields({ greeting: "안녕하세요" }, "en");
+    if (hasHangul(out.greeting)) throw new Error("Structured request returned no usable translation");
+    return { status: "ok", model: MODEL, key, structured: lastToolMode ?? "strict" };
+  } catch (err) {
+    const e = err as { status?: number; name?: string; error?: { error?: { type?: string } }; message?: string };
+    console.error("structured check failed:", e.message ?? err);
+    return {
+      status: "other",
+      model: MODEL,
+      key,
+      structured: "failed",
       httpStatus: e.status,
       errorType: e.error?.error?.type ?? e.name,
       detail: safeDetail(e.message ?? String(err)),
