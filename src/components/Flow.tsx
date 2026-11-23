@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { fieldValue, neededFromLetter, type KnownField, type LetterQuestion } from "@/lib/blanks";
 import { categoryText } from "@/lib/categories.ko";
 import {
   appealStages,
@@ -33,6 +34,7 @@ interface Saved {
   explanations: Explanations;
   facts: UserFacts;
   letter: string;
+  questions: LetterQuestion[];
   receivedDate: string;
 }
 
@@ -80,7 +82,10 @@ export default function Flow() {
   const [letter, setLetter] = useState("");
   const [tailored, setTailored] = useState(false);
   const [translation, setTranslation] = useState<TranslationStatus>("none");
-  const [namesDropped, setNamesDropped] = useState(false);
+  /** Follow-up questions the drafting model asked, and the answers typed so far. */
+  const [questions, setQuestions] = useState<LetterQuestion[]>([]);
+  const [answers, setAnswers] = useState<Record<string, string>>({});
+  const [letterEdited, setLetterEdited] = useState(false);
   const [receivedDate, setReceivedDate] = useState("");
   const [busy, setBusy] = useState<keyof Strings["busy"] | "">("");
   const [error, setError] = useState("");
@@ -99,8 +104,9 @@ export default function Flow() {
       setLetterText(saved.letterText ?? "");
       setAnalysis(saved.analysis ? { ...saved.analysis, lang: saved.analysis.lang ?? "en" } : null);
       setExplanations(saved.explanations ?? {});
-      setFacts({ ...EMPTY_FACTS, ...saved.facts });
+      setFacts({ ...EMPTY_FACTS, ...saved.facts, extra: saved.facts?.extra ?? [] });
       setLetter(saved.letter ?? "");
+      setQuestions(saved.questions ?? []);
       setReceivedDate(saved.receivedDate ?? "");
     }
     setLocale(savedLocale);
@@ -112,13 +118,13 @@ export default function Flow() {
   useEffect(() => {
     if (!ready) return;
     try {
-      const data: Saved = { step, letterText, analysis, explanations, facts, letter, receivedDate };
+      const data: Saved = { step, letterText, analysis, explanations, facts, letter, questions, receivedDate };
       window.localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
       window.localStorage.setItem(LOCALE_KEY, locale);
     } catch {
       /* private browsing or storage full: carry on without saving */
     }
-  }, [ready, step, letterText, analysis, explanations, facts, letter, receivedDate, locale]);
+  }, [ready, step, letterText, analysis, explanations, facts, letter, questions, receivedDate, locale]);
 
   useEffect(() => {
     document.documentElement.lang = locale;
@@ -195,25 +201,42 @@ export default function Flow() {
     }
   }
 
-  async function draft() {
+  async function draft(useFacts: UserFacts = facts) {
     if (!analysis) return;
     setBusy("drafting");
     setError("");
     try {
-      const res = await postJson<{ letter: string; tailored: boolean; translation: TranslationStatus; namesDropped: boolean }>(
+      const res = await postJson<{ letter: string; tailored: boolean; translation: TranslationStatus; questions?: LetterQuestion[] }>(
         "/api/draft",
-        { analysis, facts, today },
+        { analysis, facts: useFacts, today },
       );
       setLetter(res.letter);
       setTailored(res.tailored);
       setTranslation(res.translation);
-      setNamesDropped(res.namesDropped);
+      setQuestions(res.questions ?? []);
+      setAnswers({});
+      setLetterEdited(false);
       go("letter");
     } catch (e) {
       fail(e);
     } finally {
       setBusy("");
     }
+  }
+
+  /** Put the answers given on the draft screen into the letter. */
+  function updateLetter() {
+    if (letterEdited && !window.confirm(s.letter.editedConfirm)) return;
+    const extra = [...facts.extra];
+    for (const n of needed) {
+      const answer = n.kind === "question" ? (answers[n.id] ?? "").trim() : "";
+      if (n.kind === "question" && answer) {
+        extra.push({ question: n.question?.en ?? STRINGS.en.letter.genericQuestion(n.blank.slice(1, -1).toLowerCase()), answer });
+      }
+    }
+    const next = { ...facts, extra };
+    setFacts(next);
+    void draft(next);
   }
 
   function startOver() {
@@ -228,11 +251,35 @@ export default function Flow() {
     setExplanations({});
     setFacts(EMPTY_FACTS);
     setLetter("");
+    setQuestions([]);
+    setAnswers({});
     setReceivedDate("");
     go("capture");
   }
 
-  const blanks = letter.match(/\[[A-Z][^\]\n]{2,}\]/g) ?? [];
+  const needed = neededFromLetter(letter, questions);
+
+  /** The same wording the earlier steps use for each piece of information. */
+  const fieldLabel = (f: KnownField): { label: string; hint?: string } => {
+    switch (f.key) {
+      case "patientName": return { label: s.facts.patientName, hint: s.facts.patientNameHint };
+      case "representativeName": return { label: s.facts.yourName };
+      case "doctorName": return { label: s.facts.doctor };
+      case "mailingAddress": return { label: s.facts.address };
+      case "phone": return { label: s.facts.phone };
+      case "whyNeeded": return { label: s.facts.why, hint: s.facts.whyHint };
+      case "whatTried": return { label: s.facts.tried, hint: s.facts.triedHint };
+      case "harmIfDelayed": return { label: s.facts.harm, hint: s.facts.harmHint };
+      case "lateReason": return { label: s.facts.late, hint: s.facts.lateHint };
+      case "planName": return { label: s.understand.planName };
+      case "serviceDenied": return { label: s.understand.whatDenied };
+      case "memberId": return { label: s.understand.memberId };
+      case "appealAddress": return { label: s.understand.whereSend, hint: s.understand.whereSendHint };
+      case "noticeDate": return { label: s.understand.noticeDate, hint: s.understand.noticeDateHint };
+    }
+  };
+  const setField = (f: KnownField, value: string) =>
+    f.scope === "facts" ? patchFacts({ [f.key]: value }) : patch({ [f.key]: value });
   const stepIndex = STEP_IDS.indexOf(step);
   const cat = analysis ? categoryText(analysis.category, locale) : null;
 
@@ -590,18 +637,63 @@ export default function Flow() {
                 </Card>
               )}
 
-              {(blanks.length > 0 || namesDropped) && (
+              {needed.length > 0 && (
                 <Card tone="amber">
-                  <H3>{s.letter.blanks(blanks.length)}</H3>
-                  {namesDropped && <p className="mt-1 text-base">{s.letter.namesDropped}</p>}
-                  <p className="mt-1 text-base">{s.letter.blanksHint}</p>
-                  <ul className="mt-2 list-disc pl-5 text-base" lang="en">
-                    {[...new Set(blanks)].map((b) => (
-                      <li key={b} className="font-mono text-sm">
-                        {b}
-                      </li>
-                    ))}
-                  </ul>
+                  <form
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      updateLetter();
+                    }}
+                  >
+                    <H3>{s.letter.needed(needed.length)}</H3>
+                    <p className="mt-1 text-base">{s.letter.neededIntro}</p>
+                    <div className="mt-4 grid gap-4">
+                      {needed.map((n) => {
+                        if (n.kind === "question") {
+                          const label = n.question ? n.question[locale] : s.letter.genericQuestion(n.blank.slice(1, -1).toLowerCase());
+                          return (
+                            <Field key={n.id} label={label}>
+                              <textarea
+                                className="field min-h-20"
+                                value={answers[n.id] ?? ""}
+                                onChange={(e) => setAnswers((a) => ({ ...a, [n.id]: e.target.value }))}
+                              />
+                            </Field>
+                          );
+                        }
+                        const f = n.field;
+                        const value = fieldValue(f, analysis, facts);
+                        const { label, hint } = fieldLabel(f);
+                        const warning =
+                          f.input === "name" && hasHangul(value)
+                            ? s.facts.nameInEnglish
+                            : f.input === "address" && hasHangul(value)
+                              ? s.facts.addressInEnglish
+                              : undefined;
+                        return (
+                          <Field key={n.id} label={label} hint={hint} warning={warning}>
+                            {f.input === "long" || f.input === "address" ? (
+                              <textarea className="field min-h-20" value={value} onChange={(e) => setField(f, e.target.value)} />
+                            ) : (
+                              <input
+                                className="field"
+                                type={f.input === "date" ? "date" : f.input === "tel" ? "tel" : "text"}
+                                max={f.input === "date" ? today : undefined}
+                                value={value}
+                                onChange={(e) => setField(f, e.target.value)}
+                              />
+                            )}
+                          </Field>
+                        );
+                      })}
+                    </div>
+                    <p className="mt-3 text-sm text-muted">{s.letter.neededSkip}</p>
+                    <div className="mt-3">
+                      <Button type="submit" disabled={!!busy}>
+                        {busy ? s.busy[busy] : s.letter.update}
+                      </Button>
+                    </div>
+                  </form>
                 </Card>
               )}
 
@@ -611,7 +703,10 @@ export default function Flow() {
                   className="field min-h-[32rem] text-base leading-relaxed"
                   lang="en"
                   value={letter}
-                  onChange={(e) => setLetter(e.target.value)}
+                  onChange={(e) => {
+                    setLetter(e.target.value);
+                    setLetterEdited(true);
+                  }}
                   spellCheck
                 />
               </label>

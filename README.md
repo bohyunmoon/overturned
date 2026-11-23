@@ -10,7 +10,7 @@ Scope: Medicare Advantage **prior-authorization (pre-service) denials** only.
 1. **Capture**: paste the letter, or photograph it (the model reads the photo; no separate OCR service).
 2. **Explain**: classifies the denial into one of eight types and explains it in plain language. The user confirms every extracted detail.
 3. **Your side**: a short form for the facts, who signs, doctor support, and whether to ask for a fast appeal.
-4. **Draft**: a reconsideration letter built from a fixed template plus the user's facts. Missing facts become `[LOUD BLANKS]`.
+4. **Draft**: a reconsideration letter built from a fixed template plus the user's facts. Anything still missing is asked as a question above the letter, in the user's language; answers are translated if needed and placed in the letter. Nobody has to edit bracketed text by hand.
 5. **Send and track**: filing deadline, calendar file with reminders, a checklist, the plan's decision date, and the five appeal levels.
 
 PDF export and the calendar file are generated in the browser.
@@ -66,6 +66,7 @@ With no `ANTHROPIC_API_KEY`, the app still works end to end with a keyword reade
 | `src/lib/classify.ts` | Offline keyword reader and field extraction |
 | `src/lib/llm.ts` | Model calls (structured output via a forced tool), output coercion, citation guard |
 | `src/lib/letter.ts` | The letter template |
+| `src/lib/blanks.ts` | Turns each blank in the letter back into a question |
 | `src/lib/i18n.tsx`, `src/lib/categories.ko.ts` | Interface text in English and Korean |
 | `src/lib/korean.ts` | Decides what gets translated into English for the letter |
 | `src/lib/export.ts` | PDF, calendar file, photo downscaling |

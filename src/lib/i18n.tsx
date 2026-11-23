@@ -134,8 +134,8 @@ const en = {
     intro: (
       <>
         Plain words are fine. Write it in the voice of the person who will sign: &ldquo;I&rdquo; if the patient signs, &ldquo;my
-        mother&rdquo; or &ldquo;my father&rdquo; if you sign for them. Write what you know to be true. Leave anything you are
-        unsure of blank; the draft will mark it for you to fill in.
+        mother&rdquo; or &ldquo;my father&rdquo; if you sign for them. Write what you know to be true. You can skip anything
+        you are unsure of; we will ask about whatever the letter still needs on the next step.
       </>
     ),
     /** Shown only in Korean mode. */
@@ -178,21 +178,23 @@ const en = {
   letter: {
     title: "Your appeal draft",
     intro:
-      "This is a first draft for you to finish. Read every line and change anything that is not accurate. You are the one signing it.",
+      "This is a first draft. Read every line and make sure it is accurate. You are the one signing it. You can also edit the letter directly.",
     /** Shown only in Korean mode. */
     englishNote: "",
     translated:
       "Your answers in Korean were translated into English by AI for this letter. Check that the English says what you meant.",
     translationFailed:
-      "We could not translate some of your Korean answers just now. The letter must be in English, so those parts are left as blanks marked [WRITE IN ENGLISH]. Your answers are still saved: go back and press the button again to retry, or fill the blanks in English.",
+      "We could not translate some of your Korean answers just now, so they are not in the letter yet. They are listed below: press Update the letter to try again.",
     translationUnavailable:
-      "Translation is not working on this site right now. The letter must be in English, so your Korean answers are left as blanks marked [WRITE IN ENGLISH]. Your answers are still saved: go back and try again later, or fill the blanks in English.",
-    namesDropped:
-      "A name was written in Korean, so the letter shows a blank in its place. Fill it in with English letters exactly as on the plan card.",
+      "Translation is not working on this site right now, so your Korean answers are not in the letter yet. They are listed below: try Update the letter again later, or answer in English.",
     hangulLeft:
       "This letter still has Korean characters in it. They will not print correctly in the PDF, and the plan needs the letter in English. Replace them before sending.",
-    blanks: (n: number) => `${n} ${n === 1 ? "blank" : "blanks"} to fill in`,
-    blanksHint: "Look for the words in [CAPITALS AND BRACKETS] and replace each one:",
+    needed: (n: number) => `${n} more ${n === 1 ? "detail" : "details"} needed`,
+    neededIntro: "Answer here and we will put each answer into the letter for you. You do not need to edit the letter yourself.",
+    neededSkip: "Skip anything you do not know yet. You can come back to it.",
+    update: "Update the letter",
+    genericQuestion: (what: string) => `Please tell us: ${what}`,
+    editedConfirm: "You have edited the letter by hand. Updating will rewrite it and those edits will be lost. Continue?",
     textareaLabel: "Appeal letter text",
     tailored: "The argument paragraphs were drafted by AI from what you wrote. It can make mistakes. Check that every fact is true.",
     standard: "This draft uses our standard wording for this kind of denial.",
@@ -214,7 +216,10 @@ const en = {
       alarm: (days: number) => `Appeal deadline in ${days} days`,
     },
     beforeTitle: "Before you send",
-    checklistStart: ["Fill in every blank, print the letter and sign it.", "Attach a copy of the denial notice."],
+    checklistStart: [
+      "Answer any questions still open on the draft step, then print the letter and sign it.",
+      "Attach a copy of the denial notice.",
+    ],
     gather: (item: string) => `Gather if you can: ${item.charAt(0).toLowerCase()}${item.slice(1)}.`,
     checklistRep: "Attach the signed Appointment of Representative form or power of attorney.",
     checklistEnd: [
@@ -386,7 +391,7 @@ const ko: Strings = {
       <>
         쉬운 말로 쓰시면 됩니다. 서명할 사람의 입장에서 써 주세요. 환자 본인이 서명하면 &ldquo;저는&rdquo;, 대신 서명하신다면
         &ldquo;저희 어머니는&rdquo;, &ldquo;저희 아버지는&rdquo;처럼 쓰시면 됩니다. 사실이라고 알고 있는 것만 적고, 확실하지
-        않은 것은 비워 두세요. 초안에 직접 채울 빈칸으로 표시됩니다.
+        않은 것은 건너뛰셔도 됩니다. 편지에 더 필요한 내용은 다음 단계에서 다시 여쭤봅니다.
       </>
     ),
     languageNote:
@@ -428,18 +433,21 @@ const ko: Strings = {
   },
   letter: {
     title: "이의신청서 초안",
-    intro: "직접 마무리하셔야 하는 초안입니다. 한 줄씩 읽고 사실과 다른 부분은 고쳐 주세요. 서명하는 사람은 본인입니다.",
+    intro: "초안입니다. 한 줄씩 읽고 사실과 맞는지 확인해 주세요. 서명하는 사람은 본인입니다. 편지를 직접 고치셔도 됩니다.",
     englishNote: "이의신청서는 플랜이 읽을 수 있도록 영어로 작성됩니다. 플랜에는 이 영어 편지를 보내세요.",
     translated: "한국어로 쓰신 답변을 AI가 영어로 번역해 편지에 넣었습니다. 영어 문장이 뜻하신 내용과 맞는지 확인해 주세요.",
     translationFailed:
-      "지금은 한국어 답변 중 일부를 번역하지 못했습니다. 편지는 반드시 영어여야 하므로 그 부분은 [WRITE IN ENGLISH]라고 표시된 빈칸으로 남겼습니다. 쓰신 답변은 그대로 저장되어 있습니다. 뒤로 돌아가 버튼을 다시 눌러 재시도하거나, 빈칸을 영어로 직접 채워 주세요.",
+      "지금은 한국어 답변 중 일부를 번역하지 못해 아직 편지에 들어가지 않았습니다. 아래에 다시 표시해 두었으니 '편지에 반영하기'를 눌러 다시 시도해 주세요.",
     translationUnavailable:
-      "지금 이 사이트에서 번역 기능이 작동하지 않습니다. 편지는 반드시 영어여야 하므로 한국어 답변은 [WRITE IN ENGLISH]라고 표시된 빈칸으로 남겼습니다. 쓰신 답변은 그대로 저장되어 있습니다. 뒤로 돌아가 나중에 다시 시도하거나, 빈칸을 영어로 직접 채워 주세요.",
-    namesDropped: "이름이 한국어로 적혀 있어 편지에 빈칸으로 남겼습니다. 플랜 카드에 적힌 그대로 영문으로 채워 주세요.",
+      "지금 이 사이트에서 번역 기능이 작동하지 않아 한국어 답변이 아직 편지에 들어가지 않았습니다. 아래에 다시 표시해 두었으니 나중에 '편지에 반영하기'를 다시 눌러 보시거나 영어로 답해 주세요.",
     hangulLeft:
       "편지에 아직 한글이 남아 있습니다. PDF에서 제대로 인쇄되지 않으며, 플랜에는 영어 편지를 보내야 합니다. 보내기 전에 영어로 바꿔 주세요.",
-    blanks: (n) => `채워야 할 빈칸 ${n}개`,
-    blanksHint: "[대괄호 안의 영어 대문자]로 표시된 부분을 찾아 하나씩 바꿔 주세요:",
+    needed: (n) => `추가로 필요한 정보 ${n}개`,
+    neededIntro: "여기에 답하시면 편지에 넣어 드립니다. 한국어로 답하셔도 영어로 번역되어 들어갑니다. 편지를 직접 고칠 필요가 없습니다.",
+    neededSkip: "아직 모르는 것은 건너뛰셔도 됩니다. 나중에 다시 답할 수 있습니다.",
+    update: "편지에 반영하기",
+    genericQuestion: (what) => `다음 정보를 알려 주세요: ${what}`,
+    editedConfirm: "편지를 직접 고치셨습니다. 반영하기를 누르면 편지가 새로 작성되어 고친 내용이 사라집니다. 계속할까요?",
     textareaLabel: "이의신청서 내용",
     tailored: "주장 부분은 쓰신 내용을 바탕으로 AI가 작성했습니다. 틀릴 수 있으니 모든 사실이 맞는지 확인해 주세요.",
     standard: "이 초안은 이런 거부 유형에 쓰는 저희 기본 문구를 사용했습니다.",
@@ -461,7 +469,7 @@ const ko: Strings = {
       alarm: (days) => `이의신청 마감 ${days}일 전`,
     },
     beforeTitle: "보내기 전에",
-    checklistStart: ["빈칸을 모두 채우고 편지를 인쇄해 서명합니다.", "거부 통지서 사본을 첨부합니다."],
+    checklistStart: ["초안 단계에 남은 질문에 모두 답한 뒤 편지를 인쇄해 서명합니다.", "거부 통지서 사본을 첨부합니다."],
     gather: (item) => `가능하면 준비하세요: ${item}`,
     checklistRep: "서명된 대리인 지정 양식 또는 위임장을 첨부합니다.",
     checklistEnd: [

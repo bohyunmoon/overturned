@@ -96,6 +96,10 @@ export function buildLetter({ analysis: a, facts: f, today, tailoredArguments }:
     );
   }
 
+  // Follow-up answers are woven into tailored arguments by the model. With
+  // the standard wording they are added as the person's own statements.
+  if (!tailoredArguments?.length) for (const x of f.extra) p(x.answer);
+
   const args = tailoredArguments?.length ? tailoredArguments : CATEGORIES[a.category].arguments;
   for (const para of args) p(isRep ? toThirdPerson(para, patient) : para);
 

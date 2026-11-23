@@ -76,6 +76,14 @@ export interface UserFacts {
   expedited: boolean;
   /** Only used when the 65-day window has passed. */
   lateReason: string;
+  /** Answers to follow-up questions asked on the draft screen. */
+  extra: ExtraAnswer[];
+}
+
+export interface ExtraAnswer {
+  /** The question, in English, so the drafting model knows what was asked. */
+  question: string;
+  answer: string;
 }
 
 export const EMPTY_FACTS: UserFacts = {
@@ -91,4 +99,5 @@ export const EMPTY_FACTS: UserFacts = {
   harmIfDelayed: "",
   expedited: false,
   lateReason: "",
+  extra: [],
 };

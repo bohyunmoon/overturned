@@ -6,7 +6,8 @@ import { buildDeadlineIcs } from "../src/lib/export";
 import { categoryText } from "../src/lib/categories.ko";
 import { applyTranslations, blankUntranslated, dropKoreanNames, koreanFields } from "../src/lib/korean";
 import { buildLetter } from "../src/lib/letter";
-import { citesOnlyAllowed, classifyModelError, coerceAnalysis, safeDetail, stripKoreanAsides } from "../src/lib/llm";
+import { citesOnlyAllowed, classifyModelError, coerceAnalysis, questionsForBlanks, safeDetail, stripKoreanAsides } from "../src/lib/llm";
+import { BLANK_PATTERN, neededFromLetter, resolveBlank } from "../src/lib/blanks";
 import { SAMPLE_LETTER } from "../src/lib/sample";
 import { DENIAL_CATEGORIES, EMPTY_FACTS, hasHangul } from "../src/lib/types";
 import { CATEGORIES } from "../src/lib/categories";
@@ -219,4 +220,56 @@ test("Korean kept beside a translation is removed; real Korean content is not hi
   assert.equal(stripKoreanAsides("She may fall （넘어질 수 있음）."), "She may fall.");
   // Korean outside brackets is a failed translation and must still be detectable.
   assert.equal(hasHangul(stripKoreanAsides("She may 넘어질 수 있습니다.")), true);
+});
+
+test("every blank the letter template can produce becomes a question, never a hand edit", () => {
+  const empty = { ...classifyByRules("Medicare Advantage notice with nothing recognisable in it at all."), noticeDate: "" };
+  const variants = [
+    { analysis: empty, facts: EMPTY_FACTS, today: "2026-11-22" },
+    { analysis: empty, facts: { ...EMPTY_FACTS, signer: "representative" as const, expedited: true, doctorSupports: true }, today: "2026-11-22" },
+    { analysis: { ...empty, noticeDate: "2026-01-05" }, facts: EMPTY_FACTS, today: "2026-11-22" }, // late
+  ];
+  const seen = new Set<string>();
+  for (const v of variants) {
+    for (const token of buildLetter(v).match(BLANK_PATTERN) ?? []) {
+      seen.add(token);
+      assert.ok(resolveBlank(token), `no question for ${token}`);
+    }
+  }
+  assert.ok(seen.size >= 12, `expected the full set of blanks, saw ${seen.size}`);
+  for (const t of ["[WRITE IN ENGLISH: WHY THIS CARE IS NEEDED]", "[WRITE IN ENGLISH: WHAT HAPPENS IF THIS CARE IS DELAYED]"]) {
+    assert.ok(resolveBlank(t), t);
+  }
+
+  // A complete set of answers leaves nothing to ask.
+  const full = buildLetter({
+    analysis: { ...classifyByRules(SAMPLE_LETTER), appealAddress: "P.O. Box 0000, Anytown, ST 00000" },
+    facts: { ...EMPTY_FACTS, mailingAddress: "12 Sample Lane", phone: "555-0100", whyNeeded: "She cannot walk yet." },
+    today: "2026-11-22",
+  });
+  assert.deepEqual(neededFromLetter(full, []), []);
+});
+
+test("questions are listed once, in letter order, with the model's wording where it gave one", () => {
+  const q = { blank: "[DATE OF SURGERY]", en: "When was the surgery?", ko: "수술은 언제 받으셨나요?" };
+  const letter = "From [YOUR PHONE NUMBER]\nSurgery on [DATE OF SURGERY].\nCall [YOUR PHONE NUMBER]. Also [NAME OF THERAPIST].";
+  const needed = neededFromLetter(letter, [q]);
+  assert.deepEqual(needed.map((n) => n.id), ["facts.phone", "[DATE OF SURGERY]", "[NAME OF THERAPIST]"]);
+  assert.deepEqual(needed[1], { kind: "question", id: "[DATE OF SURGERY]", blank: "[DATE OF SURGERY]", question: q });
+  assert.equal(needed[2].kind === "question" && needed[2].question, null);
+
+  // The model's questions are matched to real blanks; a blank without one still gets a question.
+  const qs = questionsForBlanks(["Surgery was on [DATE OF SURGERY] by [SURGEON]. Phone [YOUR PHONE NUMBER]."], [q, { blank: "[NOT USED]", en: "x", ko: "x" }]);
+  assert.deepEqual(qs.map((x) => x.blank), ["[DATE OF SURGERY]", "[SURGEON]"]);
+  assert.equal(qs[0].ko, "수술은 언제 받으셨나요?");
+  assert.equal(qs[1].en, "Please tell us: surgeon");
+});
+
+test("follow-up answers reach the letter even with the standard wording", () => {
+  const facts = { ...EMPTY_FACTS, whyNeeded: "She cannot walk yet.", extra: [{ question: "When was the surgery?", answer: "October 20, 2026." }] };
+  const analysis = classifyByRules(SAMPLE_LETTER);
+  assert.match(buildLetter({ analysis, facts, today: "2026-11-22" }), /\nOctober 20, 2026\.\n/);
+  // With tailored arguments the model has already used them, so they are not repeated.
+  const tailored = buildLetter({ analysis, facts, today: "2026-11-22", tailoredArguments: ["Para one.", "Para two."] });
+  assert.doesNotMatch(tailored, /\nOctober 20, 2026\.\n/);
 });

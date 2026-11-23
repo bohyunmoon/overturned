@@ -2,7 +2,8 @@ import { parseIso } from "@/lib/deadlines";
 import { applyTranslations, blankUntranslated, dropKoreanNames, koreanFields } from "@/lib/korean";
 import { buildLetter } from "@/lib/letter";
 import { coerceAnalysis, draftArgumentsWithModel, hasModel, translateToEnglish } from "@/lib/llm";
-import { EMPTY_FACTS, type DenialAnalysis, type UserFacts } from "@/lib/types";
+import type { LetterQuestion } from "@/lib/blanks";
+import { EMPTY_FACTS, hasHangul, type DenialAnalysis, type UserFacts } from "@/lib/types";
 
 export const maxDuration = 60;
 
@@ -25,6 +26,13 @@ function coerceFacts(raw: Record<string, unknown>): UserFacts {
     harmIfDelayed: s(raw.harmIfDelayed, 2000),
     expedited: raw.expedited === true,
     lateReason: s(raw.lateReason, 1000),
+    extra: Array.isArray(raw.extra)
+      ? (raw.extra as Record<string, unknown>[])
+          .filter((x) => x && typeof x === "object")
+          .map((x) => ({ question: s(x.question, 300), answer: s(x.answer, 1500).trim() }))
+          .filter((x) => x.question && x.answer)
+          .slice(0, 12)
+      : [],
   };
 }
 
@@ -60,26 +68,34 @@ export async function POST(req: Request) {
   analysis = named.analysis;
   facts = named.facts;
 
-  const korean = koreanFields(analysis, facts);
+  // Follow-up answers are translated alongside the main answers.
+  const korean: Record<string, string> = { ...koreanFields(analysis, facts) };
+  facts.extra.forEach((x, i) => {
+    if (hasHangul(x.answer)) korean[`extra_${i}`] = x.answer;
+  });
   let translation: TranslationStatus = "none";
   if (Object.keys(korean).length) {
     if (!hasModel()) {
       translation = "unavailable";
     } else {
-      const result = await translateToEnglish(korean as Record<string, string>);
+      const result = await translateToEnglish(korean);
       ({ analysis, facts } = applyTranslations(analysis, facts, result.translated));
+      facts = { ...facts, extra: facts.extra.map((x, i) => ({ ...x, answer: result.translated[`extra_${i}`] ?? x.answer })) };
       translation = result.failed.length ? "failed" : "done";
     }
     ({ analysis, facts } = blankUntranslated(analysis, facts));
+    // An untranslated follow-up answer is left out, so its question is simply asked again.
+    facts = { ...facts, extra: facts.extra.filter((x) => !hasHangul(x.answer)) };
   }
 
   let tailoredArguments: string[] | undefined;
+  let questions: LetterQuestion[] = [];
   let tailored = false;
   const translatedOk = translation === "none" || translation === "done";
   const hasStory = (facts.whyNeeded + facts.whatTried + facts.harmIfDelayed).replace(/\[[^\]]*\]/g, "").trim().length > 30;
   if (hasModel() && hasStory && translatedOk) {
     try {
-      tailoredArguments = await draftArgumentsWithModel(analysis, facts);
+      ({ paragraphs: tailoredArguments, questions } = await draftArgumentsWithModel(analysis, facts));
       tailored = true;
     } catch (err) {
       console.error("draft failed, using template:", err instanceof Error ? err.message : err);
@@ -89,6 +105,7 @@ export async function POST(req: Request) {
   return Response.json({
     letter: buildLetter({ analysis, facts, today, tailoredArguments }),
     tailored,
+    questions,
     translation,
     namesDropped: named.dropped,
   });
