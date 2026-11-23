@@ -6,7 +6,7 @@ import { buildDeadlineIcs } from "../src/lib/export";
 import { categoryText } from "../src/lib/categories.ko";
 import { applyTranslations, blankUntranslated, dropKoreanNames, koreanFields } from "../src/lib/korean";
 import { buildLetter } from "../src/lib/letter";
-import { citesOnlyAllowed, classifyModelError, coerceAnalysis } from "../src/lib/llm";
+import { citesOnlyAllowed, classifyModelError, coerceAnalysis, safeDetail } from "../src/lib/llm";
 import { SAMPLE_LETTER } from "../src/lib/sample";
 import { DENIAL_CATEGORIES, EMPTY_FACTS, hasHangul } from "../src/lib/types";
 import { CATEGORIES } from "../src/lib/categories";
@@ -208,4 +208,7 @@ test("model failures are sorted into causes the site owner can act on", () => {
   assert.equal(classifyModelError(err(404, "model: claude-nope")), "model");
   assert.equal(classifyModelError(err(429, "rate limited")), "rate_limit");
   assert.equal(classifyModelError(new Error("socket hang up")), "other");
+  assert.equal(classifyModelError(err(400, "anthropic-workspace-id header is required")), "workspace");
+  assert.equal(safeDetail("bad key sk-ant-api03-AbC_123-xyz\n  rejected"), "bad key [key removed] rejected");
+  assert.equal(safeDetail("x".repeat(500)).length, 300);
 });

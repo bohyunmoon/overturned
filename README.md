@@ -47,7 +47,9 @@ Deploy: import the repo into Vercel and set `ANTHROPIC_API_KEY`. No database or 
 ### Is the AI working?
 
 Open `/api/health` on the deployed site. It makes one tiny model request and reports `ok`, `no_key`, `auth`, `billing`,
-`model`, `rate_limit` or `other`. It never shows the key.
+`workspace`, `model`, `rate_limit` or `other`, with the HTTP status and the provider's error message. It never shows the key.
+
+If the key is not scoped to a single workspace, also set `ANTHROPIC_WORKSPACE_ID`.
 
 ### Offline mode
 

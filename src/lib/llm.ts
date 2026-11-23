@@ -5,12 +5,23 @@ import { DENIAL_CATEGORIES, hasHangul, type DenialAnalysis, type Locale, type Us
 
 export const MODEL = process.env.OVERTURNED_MODEL || "claude-sonnet-5-5";
 
+/** The key as pasted, minus stray spaces or line breaks that break the request header. */
+const apiKey = () => (process.env.ANTHROPIC_API_KEY ?? "").trim();
+/** Needed only when the key is not scoped to a single workspace. */
+const workspaceId = () => (process.env.ANTHROPIC_WORKSPACE_ID ?? "").trim();
+
 export function hasModel(): boolean {
-  return Boolean(process.env.ANTHROPIC_API_KEY);
+  return Boolean(apiKey());
 }
 
 function client(): Anthropic {
-  return new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY, maxRetries: 1, timeout: 45_000 });
+  const workspace = workspaceId();
+  return new Anthropic({
+    apiKey: apiKey(),
+    maxRetries: 1,
+    timeout: 45_000,
+    ...(workspace ? { defaultHeaders: { "anthropic-workspace-id": workspace } } : {}),
+  });
 }
 
 export type ImageMediaType = "image/jpeg" | "image/png" | "image/webp";
@@ -291,26 +302,58 @@ export async function translateToEnglish<K extends string>(
 }
 
 /** Why a model call did not work, in terms the site owner can act on. */
-export type ModelProblem = "no_key" | "auth" | "billing" | "model" | "rate_limit" | "other";
+export type ModelProblem = "no_key" | "auth" | "billing" | "workspace" | "model" | "rate_limit" | "other";
 
 export function classifyModelError(err: unknown): ModelProblem {
   const status = (err as { status?: number })?.status;
   const message = err instanceof Error ? err.message.toLowerCase() : "";
   if (status === 401 || status === 403) return "auth";
   if (message.includes("credit balance") || message.includes("billing")) return "billing";
+  if (message.includes("workspace")) return "workspace";
   if (status === 404 || message.includes("model:")) return "model";
   if (status === 429) return "rate_limit";
   return "other";
 }
 
+export interface ModelCheck {
+  status: "ok" | ModelProblem;
+  model: string;
+  /** Facts about the key's shape. Never the key itself. */
+  key: { present: boolean; looksLikeApiKey: boolean; hadStraySpaces: boolean; workspaceIdSet: boolean };
+  /** Present only on failure. */
+  httpStatus?: number;
+  errorType?: string;
+  detail?: string;
+}
+
+/** Strip anything key-shaped and cap the length before a message leaves the server. */
+export function safeDetail(message: string): string {
+  return message.replace(/sk-ant-[\w-]+/g, "[key removed]").replace(/\s+/g, " ").slice(0, 300);
+}
+
 /** One tiny request to confirm the key, billing and model name all work. */
-export async function checkModel(): Promise<{ status: "ok" | ModelProblem; model: string }> {
-  if (!hasModel()) return { status: "no_key", model: MODEL };
+export async function checkModel(): Promise<ModelCheck> {
+  const raw = process.env.ANTHROPIC_API_KEY ?? "";
+  const key = {
+    present: Boolean(apiKey()),
+    looksLikeApiKey: apiKey().startsWith("sk-ant-"),
+    hadStraySpaces: raw !== raw.trim(),
+    workspaceIdSet: Boolean(workspaceId()),
+  };
+  if (!key.present) return { status: "no_key", model: MODEL, key };
   try {
     await client().messages.create({ model: MODEL, max_tokens: 1, messages: [{ role: "user", content: "ok" }] });
-    return { status: "ok", model: MODEL };
+    return { status: "ok", model: MODEL, key };
   } catch (err) {
-    console.error("model check failed:", err instanceof Error ? err.message : err);
-    return { status: classifyModelError(err), model: MODEL };
+    const e = err as { status?: number; name?: string; error?: { error?: { type?: string } }; message?: string };
+    console.error("model check failed:", e.message ?? err);
+    return {
+      status: classifyModelError(err),
+      model: MODEL,
+      key,
+      httpStatus: e.status,
+      errorType: e.error?.error?.type ?? e.name,
+      detail: safeDetail(e.message ?? String(err)),
+    };
   }
 }
