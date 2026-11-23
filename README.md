@@ -44,12 +44,42 @@ npm run dev
 
 Deploy: import the repo into Vercel and set `ANTHROPIC_API_KEY`. No database or other services.
 
+## Protecting the bill
+
+Every AI request is billed to the owner's key, so every route that can reach the model goes through `src/lib/guard.ts`.
+
+| Protection | Default | Change with |
+| --- | --- | --- |
+| Per visitor, per hour | 30 AI requests | `RATE_IP_HOURLY` |
+| Per visitor, per day | 100 AI requests | `RATE_IP_DAILY` |
+| Whole site, per day (UTC) | 500 AI requests | `DAILY_AI_CAP` |
+
+- A visitor over the limit gets a "please wait" message; their work stays saved on their device.
+- Past the site-wide cap the site keeps working without AI (keyword reader, standard wording) until midnight UTC.
+- Visitors are counted by a daily-rotating hash, never by raw IP address.
+- If the counter store is unreachable the limiter lets requests through and logs the failure.
+
+**Setup.** Connect an Upstash Redis store from the Vercel Storage tab (it adds `KV_REST_API_URL` and `KV_REST_API_TOKEN`),
+set `NTFY_TOPIC` to a long, unguessable topic name, subscribe to that topic in the ntfy phone app, and redeploy.
+Without Redis, limits are per server copy only and alerts are off.
+
+**Alerts** (phone push through ntfy):
+
+- *Usage is accelerating*: this hour's count, checked at 20, 40, 80, 160…, is at least 3x the average of the previous six hours.
+- *50%, 80% and 100%* of the daily cap.
+- *Today is double yesterday.*
+- *A visitor hit the rate limit* (once per visitor per day).
+- *Alerts are connected*: once, on the first AI request after setup.
+
 ### Is the AI working?
 
 Open `/api/health` on the deployed site. It makes one tiny model request and reports `ok`, `no_key`, `auth`, `billing`,
 `workspace`, `model`, `rate_limit` or `other`, with the HTTP status and the provider's error message. It never shows the key.
 
 If the key is not scoped to a single workspace, also set `ANTHROPIC_WORKSPACE_ID`.
+
+The same page shows `protection`: whether limits are shared (`redis`) or per copy (`memory`), whether alerts are on, and
+today's AI request counts. The page itself is limited to 6 checks per visitor per hour.
 
 ### Offline mode
 
@@ -64,6 +94,7 @@ With no `ANTHROPIC_API_KEY`, the app still works end to end with a keyword reade
 | `src/lib/deadlines.ts` | Calendar-exact date maths, filing deadline, appeal stages |
 | `src/lib/categories.ts` | The eight denial types: explanation, evidence checklist, argument paragraphs, keyword signals |
 | `src/lib/classify.ts` | Offline keyword reader and field extraction |
+| `src/lib/guard.ts` | Rate limits, daily cap, usage counts and phone alerts |
 | `src/lib/llm.ts` | Model calls (structured output via a forced tool), output coercion, citation guard |
 | `src/lib/letter.ts` | The letter template |
 | `src/lib/blanks.ts` | Turns each blank in the letter back into a question |
@@ -91,7 +122,6 @@ pages at least every January: the amount-in-controversy thresholds change yearly
 ## Not built yet
 
 - Payments and the free/paid split
-- Rate limiting and abuse protection on the three API routes (needed before public launch)
 - Multi-page photo capture
 - Email or text reminders (v1 uses a calendar file, which needs no backend)
 - A privacy policy and terms, and a legal review of the template language and of health-data obligations

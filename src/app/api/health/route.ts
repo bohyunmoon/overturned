@@ -1,4 +1,5 @@
 import { connection } from "next/server";
+import { guard, usageSnapshot } from "@/lib/guard";
 import { checkModel } from "@/lib/llm";
 
 export const maxDuration = 30;
@@ -16,8 +17,16 @@ export const maxDuration = 30;
  *   model       the model name is not available to this key
  *   rate_limit  too many requests right now
  *   other       anything else; see the function logs
+ *
+ * `protection` shows whether limits are shared across the site ("redis") or
+ * per copy ("memory"), whether phone alerts are on, and today's usage.
+ *
+ * This page makes real model requests, so it is rate limited too.
  */
-export async function GET() {
+export async function GET(req: Request) {
   await connection(); // always run at request time, never at build time
-  return Response.json(await checkModel(), { headers: { "cache-control": "no-store" } });
+  const allowed = await guard(req, "health");
+  if (!allowed.ok) return Response.json({ error: "rate_limited" }, { status: 429 });
+  const [model, protection] = await Promise.all([checkModel(), usageSnapshot()]);
+  return Response.json({ ...model, protection }, { headers: { "cache-control": "no-store" } });
 }

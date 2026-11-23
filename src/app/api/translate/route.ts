@@ -1,3 +1,4 @@
+import { guard } from "@/lib/guard";
 import { hasModel, translateFields } from "@/lib/llm";
 
 export const maxDuration = 60;
@@ -22,6 +23,9 @@ export async function POST(req: Request) {
     : [];
   if (!summary && !warnings.length) return bad("missing");
   if (!hasModel()) return bad("translate_off", 503);
+  const allowed = await guard(req, "ai");
+  if (!allowed.ok) return bad("rate_limited", 429);
+  if (!allowed.ai) return bad("translate_off", 503);
 
   try {
     const fields: Record<string, string> = { summary };

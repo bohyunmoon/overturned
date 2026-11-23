@@ -8,6 +8,7 @@ import { applyTranslations, blankUntranslated, dropKoreanNames, koreanFields } f
 import { buildLetter } from "../src/lib/letter";
 import { citesOnlyAllowed, classifyModelError, coerceAnalysis, questionsForBlanks, safeDetail, stripKoreanAsides } from "../src/lib/llm";
 import { BLANK_PATTERN, neededFromLetter, resolveBlank } from "../src/lib/blanks";
+import { capAlert, dayKey, dayOverDayAlert, guard, hourKey, isCheckpoint, MemoryStore, spikeAlert, visitorId, type CounterStore } from "../src/lib/guard";
 import { SAMPLE_LETTER } from "../src/lib/sample";
 import { DENIAL_CATEGORIES, EMPTY_FACTS, hasHangul } from "../src/lib/types";
 import { CATEGORIES } from "../src/lib/categories";
@@ -272,4 +273,79 @@ test("follow-up answers reach the letter even with the standard wording", () => 
   // With tailored arguments the model has already used them, so they are not repeated.
   const tailored = buildLetter({ analysis, facts, today: "2026-11-22", tailoredArguments: ["Para one.", "Para two."] });
   assert.doesNotMatch(tailored, /\nOctober 20, 2026\.\n/);
+});
+
+/* ---------- rate limiting and alerts ---------- */
+
+const visitor = (ip: string) => new Request("https://overturned.test/api/draft", { method: "POST", headers: { "x-forwarded-for": `${ip}, 10.0.0.1`, host: "overturned.test" } });
+/** A memory store that reports itself as the shared kind, so alert logic runs. */
+const sharedStore = (now: () => number): CounterStore => Object.assign(new MemoryStore(now), { kind: "redis" as const });
+
+test("alert rules: checkpoints double, spikes compare with the last six hours, caps fire once each", () => {
+  assert.deepEqual([19, 20, 30, 40, 60, 80, 100, 160, 320].filter(isCheckpoint), [20, 40, 80, 160, 320]);
+  assert.deepEqual(spikeAlert(20, [0, 0, 0, 0, 0, 0]), { baseline: 0 }); // from nothing to 20 in an hour
+  assert.deepEqual(spikeAlert(40, [10, 12, 8, 10, 10, 10]), { baseline: 10 }); // 4x the usual
+  assert.equal(spikeAlert(20, [10, 12, 8, 10, 10, 10]), null); // 2x: busy, not accelerating
+  assert.equal(spikeAlert(45, [0, 0, 0, 0, 0, 0]), null); // not a checkpoint
+  assert.deepEqual([249, 250, 251, 399, 400, 499, 500, 501].map((n) => capAlert(n, 500)), [null, 50, null, null, 80, null, 100, null]);
+  assert.equal(dayOverDayAlert(60, 30), true);
+  assert.equal(dayOverDayAlert(61, 30), false);
+  assert.equal(dayOverDayAlert(20, 10), false); // too small to matter
+  assert.equal(dayKey(new Date("2026-11-23T08:05:00Z")), "20261123");
+  assert.equal(hourKey(new Date("2026-11-23T08:05:00Z")), "2026112308");
+  assert.notEqual(visitorId(visitor("1.1.1.1"), "20261123"), visitorId(visitor("2.2.2.2"), "20261123"));
+  assert.notEqual(visitorId(visitor("1.1.1.1"), "20261123"), visitorId(visitor("1.1.1.1"), "20261124"));
+  assert.doesNotMatch(visitorId(visitor("1.1.1.1"), "20261123"), /1\.1\.1\.1/);
+});
+
+test("one visitor is stopped at the hourly limit, others are not, and the limit lifts the next hour", async () => {
+  let t = Date.parse("2026-11-23T08:00:00Z");
+  const store = new MemoryStore(() => t);
+  const hit = (ip: string) => guard(visitor(ip), "ai", { store, now: new Date(t), notify: async () => {} });
+  for (let i = 0; i < 30; i++) assert.deepEqual(await hit("1.1.1.1"), { ok: true, ai: true });
+  assert.deepEqual(await hit("1.1.1.1"), { ok: false });
+  assert.deepEqual(await hit("2.2.2.2"), { ok: true, ai: true });
+  t += 3600_000;
+  assert.deepEqual(await hit("1.1.1.1"), { ok: true, ai: true });
+});
+
+test("site-wide: alerts fire as usage accelerates and AI switches off at the daily cap", async () => {
+  process.env.DAILY_AI_CAP = "60";
+  process.env.NTFY_TOPIC = "test-topic";
+  try {
+    const t = Date.parse("2026-11-23T08:00:00Z");
+    const store = sharedStore(() => t);
+    const alerts: string[] = [];
+    const notify = async (title: string) => void alerts.push(title);
+    const results = [];
+    // 70 requests in one hour, spread over many visitors so no single one is limited.
+    for (let i = 0; i < 70; i++) results.push(await guard(visitor(`9.9.${i}.1`), "ai", { store, now: new Date(t), notify }));
+
+    assert.deepEqual(alerts, [
+      "Overturned: alerts are connected", // once, on the first counted request
+      "Overturned: usage is accelerating", // 20 this hour, from nothing
+      "Overturned: 50% of the daily AI cap used", // 30
+      "Overturned: usage is accelerating", // 40: still growing
+      "Overturned: 80% of the daily AI cap used", // 48
+      "Overturned: daily AI cap reached", // 60
+    ]);
+    assert.ok(results.slice(0, 60).every((r) => r.ok && r.ai));
+    assert.ok(results.slice(60).every((r) => r.ok && !r.ai), "past the cap the site still answers, without AI");
+  } finally {
+    delete process.env.DAILY_AI_CAP;
+    delete process.env.NTFY_TOPIC;
+  }
+});
+
+test("a blocked visitor does not use up the site's daily cap, and the limiter fails open", async () => {
+  const t = Date.parse("2026-11-23T08:00:00Z");
+  const store = sharedStore(() => t);
+  const alerts: string[] = [];
+  const notify = async (title: string) => void alerts.push(title);
+  for (let i = 0; i < 45; i++) await guard(visitor("3.3.3.3"), "ai", { store, now: new Date(t), notify });
+  assert.deepEqual(await store.get(["ot:h:2026112308", "ot:d:20261123"]), [30, 30]);
+  assert.equal(alerts.filter((a) => a === "Overturned: a visitor hit the rate limit").length, 1);
+
+  const broken: CounterStore = { kind: "redis", incr: async () => { throw new Error("down"); }, get: async () => [], once: async () => false };
+  assert.deepEqual(await guard(visitor("4.4.4.4"), "ai", { store: broken, now: new Date(t), notify }), { ok: true, ai: true });
 });

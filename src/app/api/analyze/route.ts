@@ -1,4 +1,5 @@
 import { classifyByRules } from "@/lib/classify";
+import { guard } from "@/lib/guard";
 import { analyzeWithModel, hasModel, type ImageMediaType } from "@/lib/llm";
 
 export const maxDuration = 60;
@@ -11,6 +12,10 @@ const IMAGE_TYPES: ImageMediaType[] = ["image/jpeg", "image/png", "image/webp"];
 const bad = (code: string, status = 400) => Response.json({ error: code }, { status });
 
 export async function POST(req: Request) {
+  const allowed = hasModel() ? await guard(req, "ai") : ({ ok: true, ai: false } as const);
+  if (!allowed.ok) return bad("rate_limited", 429);
+  const ai = allowed.ai; // false with no key, or once the site's daily AI cap is spent
+
   let body: { text?: unknown; locale?: unknown; image?: { mediaType?: unknown; base64?: unknown } };
   try {
     body = await req.json();
@@ -27,7 +32,7 @@ export async function POST(req: Request) {
     const base64 = typeof image.base64 === "string" ? image.base64 : "";
     if (!mediaType || !base64) return bad("photo_type");
     if (base64.length > MAX_IMAGE_BASE64) return bad("photo_large", 413);
-    if (!hasModel()) {
+    if (!ai) {
       return bad("photo_off", 503);
     }
     try {
@@ -41,7 +46,7 @@ export async function POST(req: Request) {
   if (text.length < 40) return bad("text_short");
   if (text.length > MAX_TEXT) return bad("text_long", 413);
 
-  if (hasModel()) {
+  if (ai) {
     try {
       return Response.json({ analysis: await analyzeWithModel({ text }, locale) });
     } catch (err) {

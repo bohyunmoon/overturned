@@ -1,5 +1,6 @@
 import { parseIso } from "@/lib/deadlines";
 import { applyTranslations, blankUntranslated, dropKoreanNames, koreanFields } from "@/lib/korean";
+import { guard } from "@/lib/guard";
 import { buildLetter } from "@/lib/letter";
 import { coerceAnalysis, draftArgumentsWithModel, hasModel, translateToEnglish } from "@/lib/llm";
 import type { LetterQuestion } from "@/lib/blanks";
@@ -48,6 +49,10 @@ function coerceFacts(raw: Record<string, unknown>): UserFacts {
 type TranslationStatus = "none" | "done" | "failed" | "unavailable";
 
 export async function POST(req: Request) {
+  const allowed = hasModel() ? await guard(req, "ai") : ({ ok: true, ai: false } as const);
+  if (!allowed.ok) return bad("rate_limited", 429);
+  const ai = allowed.ai; // false with no key, or once the site's daily AI cap is spent
+
   let body: { analysis?: unknown; facts?: unknown; today?: unknown };
   try {
     body = await req.json();
@@ -75,7 +80,7 @@ export async function POST(req: Request) {
   });
   let translation: TranslationStatus = "none";
   if (Object.keys(korean).length) {
-    if (!hasModel()) {
+    if (!ai) {
       translation = "unavailable";
     } else {
       const result = await translateToEnglish(korean);
@@ -93,7 +98,7 @@ export async function POST(req: Request) {
   let tailored = false;
   const translatedOk = translation === "none" || translation === "done";
   const hasStory = (facts.whyNeeded + facts.whatTried + facts.harmIfDelayed).replace(/\[[^\]]*\]/g, "").trim().length > 30;
-  if (hasModel() && hasStory && translatedOk) {
+  if (ai && hasStory && translatedOk) {
     try {
       ({ paragraphs: tailoredArguments, questions } = await draftArgumentsWithModel(analysis, facts));
       tailored = true;
