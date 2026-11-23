@@ -6,7 +6,7 @@ import { buildDeadlineIcs } from "../src/lib/export";
 import { categoryText } from "../src/lib/categories.ko";
 import { applyTranslations, blankUntranslated, dropKoreanNames, koreanFields } from "../src/lib/korean";
 import { buildLetter } from "../src/lib/letter";
-import { citesOnlyAllowed, classifyModelError, coerceAnalysis, safeDetail } from "../src/lib/llm";
+import { citesOnlyAllowed, classifyModelError, coerceAnalysis, safeDetail, stripKoreanAsides } from "../src/lib/llm";
 import { SAMPLE_LETTER } from "../src/lib/sample";
 import { DENIAL_CATEGORIES, EMPTY_FACTS, hasHangul } from "../src/lib/types";
 import { CATEGORIES } from "../src/lib/categories";
@@ -211,4 +211,12 @@ test("model failures are sorted into causes the site owner can act on", () => {
   assert.equal(classifyModelError(err(400, "anthropic-workspace-id header is required")), "workspace");
   assert.equal(safeDetail("bad key sk-ant-api03-AbC_123-xyz\n  rejected"), "bad key [key removed] rejected");
   assert.equal(safeDetail("x".repeat(500)).length, 300);
+});
+
+test("Korean kept beside a translation is removed; real Korean content is not hidden", () => {
+  assert.equal(stripKoreanAsides("She would move to a nursing home (요양원) next week."), "She would move to a nursing home next week.");
+  assert.equal(stripKoreanAsides("Hip replacement [고관절 치환술] on Oct 20 (left side)."), "Hip replacement on Oct 20 (left side).");
+  assert.equal(stripKoreanAsides("She may fall （넘어질 수 있음）."), "She may fall.");
+  // Korean outside brackets is a failed translation and must still be detectable.
+  assert.equal(hasHangul(stripKoreanAsides("She may 넘어질 수 있습니다.")), true);
 });

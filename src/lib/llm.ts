@@ -276,6 +276,8 @@ Rules:
 - Keep the same grammatical person and tense as the original. Keep names, numbers, dates, drug names and addresses unchanged.
 - Use the ordinary English medical term where one exists (for example 고관절 치환술 is "hip replacement").
 - If a value is already in English, return it unchanged. If it mixes languages, translate only the Korean parts.
+- The result must be entirely in English with no Korean characters anywhere. Do not keep the original in parentheses. For a Korean word with no English equivalent, describe it in English or romanize it.
+- Every value must be translated in full, however short, informal, emotional or incomplete it is. Never return an empty value and never refuse a field; these are a patient's own words about their own care.
 - Return every key you were given.`;
 
 const TO_KOREAN = `You translate plain-language explanations of a Medicare Advantage denial notice from English into Korean for the enrollee or their family caregiver.
@@ -315,11 +317,40 @@ export async function translateFields<K extends string>(fields: Record<K, string
     maxTokens: 8000,
   });
   for (const k of keys) {
-    const v = s(input[k], 6000);
+    const raw = s(input[k], 6000);
+    const v = target === "en" ? stripKoreanAsides(raw) : raw;
     if (!v || (target === "en" && hasHangul(v))) continue;
     out[k] = v;
   }
   return out;
+}
+
+/**
+ * Models sometimes keep the original beside the translation, as in
+ * "nursing home (요양원)". Remove bracketed asides that contain Korean; the
+ * English beside them is the translation.
+ */
+export function stripKoreanAsides(text: string): string {
+  return text
+    .replace(/\s*[(\[（][^()\[\]（）]*[\u1100-\u11FF\u3130-\u318F\uAC00-\uD7A3][^()\[\]（）]*[)\]）]/g, "")
+    .replace(/[ \t]{2,}/g, " ")
+    .trim();
+}
+
+const TO_ENGLISH_PLAIN = `${TO_ENGLISH.replace("- Return every key you were given.", "").trim()}
+- Reply with the English translation only: no preface, no quotation marks, no notes.`;
+
+/** Last resort for one stubborn field: a plain request with no tool involved. */
+async function translateOnePlain(text: string): Promise<string> {
+  const res = await client().messages.create({
+    model: MODEL,
+    max_tokens: 4000,
+    system: TO_ENGLISH_PLAIN,
+    output_config: { effort: "low" },
+    messages: [{ role: "user", content: `<text>\n${text}\n</text>` }],
+  } as Anthropic.MessageCreateParamsNonStreaming);
+  const out = res.content.map((b) => (b.type === "text" ? b.text : "")).join("").trim();
+  return stripKoreanAsides(out.replace(/^<text>\s*|\s*<\/text>$/g, "").replace(/^["“]|["”]$/g, ""));
 }
 
 /**
@@ -346,6 +377,22 @@ export async function translateToEnglish<K extends string>(
       error = classifyModelError(err);
       console.error(`translation attempt ${attempt + 1} failed (${error}):`, err instanceof Error ? err.message : err);
       if (error !== "other" && error !== "rate_limit") break; // a key, billing or model problem will not fix itself
+    }
+  }
+  // Anything still untranslated gets one plain request each, without the tool.
+  for (const k of Object.keys(pending) as K[]) {
+    try {
+      const v = await translateOnePlain(pending[k]);
+      if (v && !hasHangul(v)) {
+        translated[k] = v;
+        delete pending[k];
+      } else {
+        // Log the reason, never the text: it is a patient's own account.
+        console.error(`translation of ${k} failed: ${v ? "result still contained Korean" : "empty result"} (${pending[k].length} chars in)`);
+      }
+    } catch (err) {
+      error = classifyModelError(err);
+      console.error(`plain translation of ${k} failed (${error}):`, err instanceof Error ? err.message : err);
     }
   }
   return { translated, failed: Object.keys(pending) as K[], error };
