@@ -271,7 +271,7 @@ export default function Flow() {
             ))}
           </div>
         </div>
-        <h1 className={`mt-5 font-serif font-bold leading-[1.2] ${locale === "ko" ? "text-3xl sm:text-4xl" : "text-4xl sm:text-5xl"}`}>{s.hero.title}</h1>
+        <h1 className={`mt-5 font-extrabold leading-[1.15] tracking-tight ${locale === "ko" ? "text-3xl sm:text-4xl" : "text-4xl sm:text-5xl"}`}>{s.hero.title}</h1>
         <p className="mt-4 text-lg text-muted">{s.hero.sub}</p>
       </header>
 
@@ -608,7 +608,7 @@ export default function Flow() {
               <label className="block">
                 <span className="sr-only">{s.letter.textareaLabel}</span>
                 <textarea
-                  className="field min-h-[32rem] font-serif text-base leading-relaxed"
+                  className="field min-h-[32rem] text-base leading-relaxed"
                   lang="en"
                   value={letter}
                   onChange={(e) => setLetter(e.target.value)}
@@ -811,7 +811,7 @@ function DeadlineCard({ deadline, locale }: { deadline: ReturnType<typeof filing
       ) : (
         <>
           <p className="mt-2 text-lg">{s.mustReceive(date)}</p>
-          <p className="mt-1 font-serif text-3xl font-bold">{s.daysLeft(deadline.daysLeft)}</p>
+          <p className="mt-1 text-3xl font-extrabold tracking-tight">{s.daysLeft(deadline.daysLeft)}</p>
           <p className="mt-2 text-base">{s.dontWait(deadline.fallsOnWeekend)}</p>
         </>
       )}

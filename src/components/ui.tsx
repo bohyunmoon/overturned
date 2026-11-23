@@ -67,9 +67,9 @@ export function Field({
 }
 
 export function H2({ children }: { children: ReactNode }) {
-  return <h2 className="font-serif text-2xl font-bold leading-tight sm:text-3xl">{children}</h2>;
+  return <h2 className="text-2xl font-bold leading-tight tracking-tight sm:text-3xl">{children}</h2>;
 }
 
 export function H3({ children }: { children: ReactNode }) {
-  return <h3 className="font-serif text-xl font-bold leading-snug">{children}</h3>;
+  return <h3 className="text-xl font-bold leading-snug tracking-tight">{children}</h3>;
 }

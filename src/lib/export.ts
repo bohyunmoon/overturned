@@ -8,13 +8,13 @@ export async function downloadLetterPdf(letter: string, filename = "appeal-lette
   const width = doc.internal.pageSize.getWidth() - margin * 2;
   const bottom = doc.internal.pageSize.getHeight() - margin;
   const lineHeight = 15;
-  doc.setFont("times", "normal");
-  doc.setFontSize(11.5);
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(11);
 
   let y = margin;
   for (const raw of letter.split("\n")) {
     const heading = /^[A-Z][A-Z ]{8,}$/.test(raw.trim()) || raw.startsWith("RE:");
-    doc.setFont("times", heading ? "bold" : "normal");
+    doc.setFont("helvetica", heading ? "bold" : "normal");
     const wrapped: string[] = raw.trim() === "" ? [""] : doc.splitTextToSize(raw, width);
     for (const line of wrapped) {
       if (y > bottom) {
@@ -28,7 +28,7 @@ export async function downloadLetterPdf(letter: string, filename = "appeal-lette
 
   const pages = doc.getNumberOfPages();
   if (pages > 1) {
-    doc.setFont("times", "normal");
+    doc.setFont("helvetica", "normal");
     doc.setFontSize(9);
     for (let i = 1; i <= pages; i++) {
       doc.setPage(i);
