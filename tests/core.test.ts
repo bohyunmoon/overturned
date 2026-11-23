@@ -346,6 +346,6 @@ test("a blocked visitor does not use up the site's daily cap, and the limiter fa
   assert.deepEqual(await store.get(["ot:h:2026112308", "ot:d:20261123"]), [30, 30]);
   assert.equal(alerts.filter((a) => a === "Overturned: a visitor hit the rate limit").length, 1);
 
-  const broken: CounterStore = { kind: "redis", incr: async () => { throw new Error("down"); }, get: async () => [], once: async () => false };
+  const broken: CounterStore = { kind: "redis", incr: async () => { throw new Error("down"); }, get: async () => [], once: async () => false, note: async () => {}, readNote: async () => "" };
   assert.deepEqual(await guard(visitor("4.4.4.4"), "ai", { store: broken, now: new Date(t), notify }), { ok: true, ai: true });
 });

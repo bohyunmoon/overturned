@@ -60,10 +60,12 @@ Every AI request is billed to the owner's key, so every route that can reach the
 - If the counter store is unreachable the limiter lets requests through and logs the failure.
 
 **Setup.** Connect an Upstash Redis store from the Vercel Storage tab (it adds `KV_REST_API_URL` and `KV_REST_API_TOKEN`),
-set `NTFY_TOPIC` to a long, unguessable topic name, subscribe to that topic in the ntfy phone app, and redeploy.
+set `RESEND_API_KEY` and `ALERT_EMAIL` for email alerts, and redeploy. `ALERT_EMAIL` must be the address the Resend
+account was created with, unless `ALERT_FROM` uses a domain verified in Resend. A phone push through ntfy (`NTFY_TOPIC`)
+is also supported, alongside or instead of email.
 Without Redis, limits are per server copy only and alerts are off.
 
-**Alerts** (phone push through ntfy):
+**Alerts** (by email):
 
 - *Usage is accelerating*: this hour's count, checked at 20, 40, 80, 160…, is at least 3x the average of the previous six hours.
 - *50%, 80% and 100%* of the daily cap.
@@ -79,7 +81,7 @@ Open `/api/health` on the deployed site. It makes one tiny model request and rep
 If the key is not scoped to a single workspace, also set `ANTHROPIC_WORKSPACE_ID`.
 
 The same page shows `protection`: whether limits are shared (`redis`) or per copy (`memory`), whether alerts are on, and
-today's AI request counts. The page itself is limited to 6 checks per visitor per hour.
+today's AI request counts, and `lastAlertProblem` if an alert could not be delivered. The page itself is limited to 6 checks per visitor per hour.
 
 ### Offline mode
 

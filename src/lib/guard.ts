@@ -9,8 +9,8 @@ import { createHash } from "node:crypto";
  *   2. caps AI requests for the whole site per day, after which the site
  *      keeps working without AI (keyword reader, standard letter wording);
  *   3. keeps hourly and daily usage counts; and
- *   4. pushes an alert to the owner's phone (via ntfy) when usage is
- *      accelerating or a cap is being approached.
+ *   4. emails the owner (via Resend) when usage is accelerating or a cap is
+ *      being approached. A phone push through ntfy is also supported.
  *
  * Counts live in Upstash Redis when it is connected, so they are shared by
  * every copy of the site. Without it, each copy counts on its own in memory:
@@ -92,12 +92,22 @@ export interface CounterStore {
   get(keys: string[]): Promise<number[]>;
   /** True the first time it is called for a key, false afterwards. */
   once(key: string, ttlSeconds: number): Promise<boolean>;
+  /** Keep a short text note, such as the last alert delivery problem. */
+  note(key: string, text: string, ttlSeconds: number): Promise<void>;
+  readNote(key: string): Promise<string>;
 }
 
 export class MemoryStore implements CounterStore {
   kind = "memory" as const;
   private data = new Map<string, { n: number; expires: number }>();
+  private notes = new Map<string, string>();
   constructor(private now: () => number = Date.now) {}
+  async note(key: string, text: string) {
+    this.notes.set(key, text);
+  }
+  async readNote(key: string) {
+    return this.notes.get(key) ?? "";
+  }
   private read(key: string) {
     const e = this.data.get(key);
     if (e && e.expires <= this.now()) {
@@ -156,6 +166,13 @@ class RedisStore implements CounterStore {
     const [r] = await this.pipeline([["SET", key, 1, "EX", ttl, "NX"]]);
     return r === "OK";
   }
+  async note(key: string, text: string, ttl: number) {
+    await this.pipeline([["SET", key, text.slice(0, 300), "EX", ttl]]);
+  }
+  async readNote(key: string) {
+    const [r] = await this.pipeline([["GET", key]]);
+    return typeof r === "string" ? r : "";
+  }
 }
 
 const memory = new MemoryStore();
@@ -176,14 +193,70 @@ function store(): CounterStore {
 /* ---------- alerts ---------- */
 
 const ntfyTopic = () => (process.env.NTFY_TOPIC ?? "").trim();
-export const alertsConfigured = () => Boolean(ntfyTopic()) && sharedStoreConfigured();
+const emailConfig = () => {
+  const key = (process.env.RESEND_API_KEY ?? "").trim();
+  const to = (process.env.ALERT_EMAIL ?? "").trim();
+  // Resend's shared sender only delivers to the Resend account's own address,
+  // which is exactly what an alert to the site owner needs.
+  const from = (process.env.ALERT_FROM ?? "Overturned alerts <onboarding@resend.dev>").trim();
+  return key && to ? { key, to, from } : null;
+};
+
+/** Which alert channels are set up, e.g. ["email"]. */
+export const alertChannels = () => [...(emailConfig() ? ["email"] : []), ...(ntfyTopic() ? ["ntfy"] : [])];
+export const alertsConfigured = () => alertChannels().length > 0 && sharedStoreConfigured();
 
 type Priority = "default" | "high" | "urgent";
 
-/** Push a notification to the owner's phone. Never throws. Header values stay ASCII. */
-async function push(title: string, body: string, priority: Priority, tags: string): Promise<void> {
+const ALERT_ERROR_KEY = "ot:alert:lasterror";
+
+/** Send an alert on every channel that is set up. Never throws. Returns false if any channel failed. */
+async function push(title: string, body: string, priority: Priority, tags: string): Promise<boolean | void> {
+  const problems = (await Promise.all([sendEmail(title, body, priority), sendNtfy(title, body, priority, tags)])).filter(Boolean);
+  if (problems.length) {
+    console.error("alert not delivered:", problems.join("; "));
+    try {
+      await store().note(ALERT_ERROR_KEY, `${new Date().toISOString()} ${problems.join("; ")}`, 7 * DAY);
+    } catch {
+      /* the log line above is the record */
+    }
+  }
+  return problems.length === 0;
+}
+
+/** Returns a short description of what went wrong, or "" on success or when email is not set up. */
+async function sendEmail(title: string, body: string, priority: Priority): Promise<string> {
+  const cfg = emailConfig();
+  if (!cfg) return "";
+  const api = (process.env.RESEND_API_URL ?? "https://api.resend.com").trim().replace(/\/$/, "");
+  try {
+    const res = await fetch(`${api}/emails`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${cfg.key}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        from: cfg.from,
+        to: [cfg.to],
+        subject: priority === "urgent" ? `[URGENT] ${title}` : title,
+        text: `${body}\n\nSent by your Overturned site. To change limits or stop these emails, edit the environment variables in Vercel.`,
+      }),
+      signal: AbortSignal.timeout(5000),
+      cache: "no-store",
+    });
+    if (res.ok) return "";
+    const detail = (await res.text().catch(() => "")).replace(/re_[\w-]+/g, "[key removed]")
+      .replace(/[\w.+-]+@[\w-]+(\.[\w-]+)+/g, "[address removed]") // the diagnostics page is public
+      .replace(/\s+/g, " ")
+      .slice(0, 200);
+    return `email: Resend answered ${res.status} ${detail}`;
+  } catch (err) {
+    return `email: ${err instanceof Error ? err.message : "request failed"}`;
+  }
+}
+
+/** Phone push through ntfy. Header values stay ASCII. */
+async function sendNtfy(title: string, body: string, priority: Priority, tags: string): Promise<string> {
   const topic = ntfyTopic();
-  if (!topic) return;
+  if (!topic) return "";
   const server = (process.env.NTFY_SERVER ?? "https://ntfy.sh").trim().replace(/\/$/, "");
   try {
     const res = await fetch(`${server}/${encodeURIComponent(topic)}`, {
@@ -193,9 +266,9 @@ async function push(title: string, body: string, priority: Priority, tags: strin
       signal: AbortSignal.timeout(3000),
       cache: "no-store",
     });
-    if (!res.ok) console.error(`alert not delivered: ntfy answered ${res.status}`);
+    return res.ok ? "" : `ntfy answered ${res.status}`;
   } catch (err) {
-    console.error("alert not delivered:", err instanceof Error ? err.message : err);
+    return `ntfy: ${err instanceof Error ? err.message : "request failed"}`;
   }
 }
 
@@ -273,14 +346,18 @@ async function watch(a: {
 }): Promise<void> {
   const { s, now, siteHour, siteDay, cap, site, notify } = a;
 
-  // First counted request after alerts are connected: confirm they work, once.
-  if (ntfyTopic() && (await s.once("ot:alert:hello", 365 * DAY))) {
-    await notify(
+  // First counted request after an alert channel is connected: confirm it works, once per channel set.
+  const channels = alertChannels();
+  // If delivery fails (a wrong address, say), it is tried again ten minutes later rather than never.
+  const hello = `ot:alert:hello:${channels.join("+")}`;
+  if (channels.length && !(await s.readNote(`${hello}:sent`)) && (await s.once(hello, 600))) {
+    const delivered = await notify(
       "Overturned: alerts are connected",
-      `You will get a push here when AI usage on ${site} is accelerating or nearing the daily cap of ${cap} requests.`,
+      `You will be alerted here when AI usage on ${site} is accelerating or nearing the daily cap of ${cap} requests.`,
       "default",
       "white_check_mark",
     );
+    if (delivered !== false) await s.note(`${hello}:sent`, "1", 365 * DAY);
   }
 
   if (isCheckpoint(siteHour)) {
@@ -326,10 +403,16 @@ async function watch(a: {
 /** For the owner's diagnostics page. */
 export async function usageSnapshot(now: Date = new Date()) {
   const L = limits();
-  const base = { store: sharedStoreConfigured() ? ("redis" as const) : ("memory" as const), alerts: alertsConfigured(), limits: L };
+  const base = {
+    store: sharedStoreConfigured() ? ("redis" as const) : ("memory" as const),
+    alerts: alertsConfigured(),
+    alertChannels: alertChannels(),
+    limits: L,
+  };
   try {
     const [thisHour, today] = await store().get([`ot:h:${hourKey(now)}`, `ot:d:${dayKey(now)}`]);
-    return { ...base, aiRequestsThisHour: thisHour, aiRequestsToday: today };
+    const lastAlertProblem = await store().readNote(ALERT_ERROR_KEY);
+    return { ...base, aiRequestsThisHour: thisHour, aiRequestsToday: today, ...(lastAlertProblem ? { lastAlertProblem } : {}) };
   } catch {
     return { ...base, storeError: true };
   }
