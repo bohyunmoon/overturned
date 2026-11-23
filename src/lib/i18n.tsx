@@ -184,9 +184,9 @@ const en = {
     translated:
       "Your answers in Korean were translated into English by AI for this letter. Check that the English says what you meant.",
     translationFailed:
-      "We could not translate your Korean answers just now, so they are in the letter as you wrote them. Go back and try again, or rewrite those parts in English. The plan needs the letter in English.",
+      "We could not translate some of your Korean answers just now. The letter must be in English, so those parts are left as blanks marked [WRITE IN ENGLISH]. Your answers are still saved: go back and press the button again to retry, or fill the blanks in English.",
     translationUnavailable:
-      "Translation is not switched on for this site yet, so your Korean answers are in the letter as you wrote them. Rewrite those parts in English before sending. The plan needs the letter in English.",
+      "Translation is not working on this site right now. The letter must be in English, so your Korean answers are left as blanks marked [WRITE IN ENGLISH]. Your answers are still saved: go back and try again later, or fill the blanks in English.",
     namesDropped:
       "A name was written in Korean, so the letter shows a blank in its place. Fill it in with English letters exactly as on the plan card.",
     hangulLeft:
@@ -432,9 +432,9 @@ const ko: Strings = {
     englishNote: "이의신청서는 플랜이 읽을 수 있도록 영어로 작성됩니다. 플랜에는 이 영어 편지를 보내세요.",
     translated: "한국어로 쓰신 답변을 AI가 영어로 번역해 편지에 넣었습니다. 영어 문장이 뜻하신 내용과 맞는지 확인해 주세요.",
     translationFailed:
-      "지금은 한국어 답변을 번역하지 못해 쓰신 그대로 편지에 들어가 있습니다. 뒤로 돌아가 다시 시도하거나 해당 부분을 영어로 고쳐 써 주세요. 플랜에는 영어 편지를 보내야 합니다.",
+      "지금은 한국어 답변 중 일부를 번역하지 못했습니다. 편지는 반드시 영어여야 하므로 그 부분은 [WRITE IN ENGLISH]라고 표시된 빈칸으로 남겼습니다. 쓰신 답변은 그대로 저장되어 있습니다. 뒤로 돌아가 버튼을 다시 눌러 재시도하거나, 빈칸을 영어로 직접 채워 주세요.",
     translationUnavailable:
-      "이 사이트에서는 아직 번역 기능이 켜져 있지 않아 한국어 답변이 쓰신 그대로 편지에 들어가 있습니다. 보내기 전에 해당 부분을 영어로 고쳐 써 주세요. 플랜에는 영어 편지를 보내야 합니다.",
+      "지금 이 사이트에서 번역 기능이 작동하지 않습니다. 편지는 반드시 영어여야 하므로 한국어 답변은 [WRITE IN ENGLISH]라고 표시된 빈칸으로 남겼습니다. 쓰신 답변은 그대로 저장되어 있습니다. 뒤로 돌아가 나중에 다시 시도하거나, 빈칸을 영어로 직접 채워 주세요.",
     namesDropped: "이름이 한국어로 적혀 있어 편지에 빈칸으로 남겼습니다. 플랜 카드에 적힌 그대로 영문으로 채워 주세요.",
     hangulLeft:
       "편지에 아직 한글이 남아 있습니다. PDF에서 제대로 인쇄되지 않으며, 플랜에는 영어 편지를 보내야 합니다. 보내기 전에 영어로 바꿔 주세요.",

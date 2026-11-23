@@ -1,7 +1,7 @@
 import { parseIso } from "@/lib/deadlines";
-import { applyTranslations, dropKoreanNames, koreanFields } from "@/lib/korean";
+import { applyTranslations, blankUntranslated, dropKoreanNames, koreanFields } from "@/lib/korean";
 import { buildLetter } from "@/lib/letter";
-import { coerceAnalysis, draftArgumentsWithModel, hasModel, translateFields } from "@/lib/llm";
+import { coerceAnalysis, draftArgumentsWithModel, hasModel, translateToEnglish } from "@/lib/llm";
 import { EMPTY_FACTS, type DenialAnalysis, type UserFacts } from "@/lib/types";
 
 export const maxDuration = 60;
@@ -31,8 +31,11 @@ function coerceFacts(raw: Record<string, unknown>): UserFacts {
 /**
  * - none: nothing was written in Korean
  * - done: Korean answers were translated into English
- * - failed: translation was attempted and did not succeed
+ * - failed: translation did not succeed for at least one answer
  * - unavailable: no model is configured, so nothing could be translated
+ *
+ * Whatever the status, no Korean answer is ever placed in the letter: an
+ * answer that could not be translated becomes a fill-in blank.
  */
 type TranslationStatus = "none" | "done" | "failed" | "unavailable";
 
@@ -63,21 +66,17 @@ export async function POST(req: Request) {
     if (!hasModel()) {
       translation = "unavailable";
     } else {
-      try {
-        const translated = await translateFields(korean as Record<string, string>, "en");
-        ({ analysis, facts } = applyTranslations(analysis, facts, translated));
-        translation = "done";
-      } catch (err) {
-        console.error("translation failed:", err instanceof Error ? err.message : err);
-        translation = "failed";
-      }
+      const result = await translateToEnglish(korean as Record<string, string>);
+      ({ analysis, facts } = applyTranslations(analysis, facts, result.translated));
+      translation = result.failed.length ? "failed" : "done";
     }
+    ({ analysis, facts } = blankUntranslated(analysis, facts));
   }
 
   let tailoredArguments: string[] | undefined;
   let tailored = false;
   const translatedOk = translation === "none" || translation === "done";
-  const hasStory = (facts.whyNeeded + facts.whatTried + facts.harmIfDelayed).trim().length > 30;
+  const hasStory = (facts.whyNeeded + facts.whatTried + facts.harmIfDelayed).replace(/\[[^\]]*\]/g, "").trim().length > 30;
   if (hasModel() && hasStory && translatedOk) {
     try {
       tailoredArguments = await draftArgumentsWithModel(analysis, facts);

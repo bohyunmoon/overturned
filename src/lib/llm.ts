@@ -223,7 +223,11 @@ Rules:
 - Keep names, numbers, dates and phone numbers unchanged.
 - Return every key you were given.`;
 
-/** Translate a set of named strings. Empty values are passed through untouched. */
+/**
+ * Translate a set of named strings. Empty values are passed through
+ * untouched. A field the model fails to translate is returned unchanged, so
+ * the caller must check the result (see translateToEnglish).
+ */
 export async function translateFields<K extends string>(fields: Record<K, string>, target: Locale): Promise<Record<K, string>> {
   const keys = (Object.keys(fields) as K[]).filter((k) => fields[k].trim());
   const out = { ...fields };
@@ -251,9 +255,62 @@ export async function translateFields<K extends string>(fields: Record<K, string
   const input = block.input as Record<string, unknown>;
   for (const k of keys) {
     const v = s(input[k], 6000);
-    if (!v) throw new Error(`Translation missing for ${k}`);
-    if (target === "en" && hasHangul(v)) throw new Error(`Translation of ${k} still contains Korean`);
+    if (!v || (target === "en" && hasHangul(v))) continue;
     out[k] = v;
   }
   return out;
+}
+
+/**
+ * Translate Korean fields into English, trying twice. Returns the fields
+ * that came back in English and the names of any that did not. Never throws.
+ */
+export async function translateToEnglish<K extends string>(
+  fields: Record<K, string>,
+): Promise<{ translated: Partial<Record<K, string>>; failed: K[]; error?: ModelProblem }> {
+  const translated: Partial<Record<K, string>> = {};
+  let pending = { ...fields };
+  let error: ModelProblem | undefined;
+  for (let attempt = 0; attempt < 2 && Object.keys(pending).length; attempt++) {
+    try {
+      const out = await translateFields(pending, "en");
+      const next = {} as Record<K, string>;
+      for (const k of Object.keys(pending) as K[]) {
+        if (hasHangul(out[k])) next[k] = pending[k];
+        else translated[k] = out[k];
+      }
+      pending = next;
+      error = undefined;
+    } catch (err) {
+      error = classifyModelError(err);
+      console.error(`translation attempt ${attempt + 1} failed (${error}):`, err instanceof Error ? err.message : err);
+      if (error !== "other" && error !== "rate_limit") break; // a key, billing or model problem will not fix itself
+    }
+  }
+  return { translated, failed: Object.keys(pending) as K[], error };
+}
+
+/** Why a model call did not work, in terms the site owner can act on. */
+export type ModelProblem = "no_key" | "auth" | "billing" | "model" | "rate_limit" | "other";
+
+export function classifyModelError(err: unknown): ModelProblem {
+  const status = (err as { status?: number })?.status;
+  const message = err instanceof Error ? err.message.toLowerCase() : "";
+  if (status === 401 || status === 403) return "auth";
+  if (message.includes("credit balance") || message.includes("billing")) return "billing";
+  if (status === 404 || message.includes("model:")) return "model";
+  if (status === 429) return "rate_limit";
+  return "other";
+}
+
+/** One tiny request to confirm the key, billing and model name all work. */
+export async function checkModel(): Promise<{ status: "ok" | ModelProblem; model: string }> {
+  if (!hasModel()) return { status: "no_key", model: MODEL };
+  try {
+    await client().messages.create({ model: MODEL, max_tokens: 1, messages: [{ role: "user", content: "ok" }] });
+    return { status: "ok", model: MODEL };
+  } catch (err) {
+    console.error("model check failed:", err instanceof Error ? err.message : err);
+    return { status: classifyModelError(err), model: MODEL };
+  }
 }

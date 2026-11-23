@@ -26,7 +26,8 @@ and a browser set to Korean starts in Korean.
 - **Names** are never translated or romanized, because they must match the plan's records. A name typed in Korean becomes a blank in the letter.
 - **Addresses** are left exactly as typed.
 
-Translation needs the model. With no API key, Korean answers stay as typed and the letter screen says so.
+The letter never contains Korean answers. Translation needs the model; if it is unavailable or fails (after one retry),
+each untranslated answer becomes a `[WRITE IN ENGLISH: …]` blank and the letter screen says so.
 
 Interface text lives in `src/lib/i18n.tsx` and `src/lib/categories.ko.ts`. The Korean object is typed against the English one,
 so a missing string fails the build. The Korean copy has not been reviewed by a native-speaking Medicare counselor; do that before launch.
@@ -42,6 +43,11 @@ npm run dev
 `npm test` runs the unit tests, `npm run lint` and `npm run build` should both pass before deploying.
 
 Deploy: import the repo into Vercel and set `ANTHROPIC_API_KEY`. No database or other services.
+
+### Is the AI working?
+
+Open `/api/health` on the deployed site. It makes one tiny model request and reports `ok`, `no_key`, `auth`, `billing`,
+`model`, `rate_limit` or `other`. It never shows the key.
 
 ### Offline mode
 

@@ -4,9 +4,9 @@ import { classifyByRules, findDates, findNoticeDate } from "../src/lib/classify"
 import { addDays, daysBetween, filingDeadline, parseIso, planDecisionDue, planDecisionWindow } from "../src/lib/deadlines";
 import { buildDeadlineIcs } from "../src/lib/export";
 import { categoryText } from "../src/lib/categories.ko";
-import { applyTranslations, dropKoreanNames, koreanFields } from "../src/lib/korean";
+import { applyTranslations, blankUntranslated, dropKoreanNames, koreanFields } from "../src/lib/korean";
 import { buildLetter } from "../src/lib/letter";
-import { citesOnlyAllowed, coerceAnalysis } from "../src/lib/llm";
+import { citesOnlyAllowed, classifyModelError, coerceAnalysis } from "../src/lib/llm";
 import { SAMPLE_LETTER } from "../src/lib/sample";
 import { DENIAL_CATEGORIES, EMPTY_FACTS, hasHangul } from "../src/lib/types";
 import { CATEGORIES } from "../src/lib/categories";
@@ -172,4 +172,40 @@ test("Korean answers are found for translation; names and addresses are not tran
   assert.match(letter, /서울시 12 Sample Lane/); // address left exactly as typed
   assert.equal(hasHangul(letter.replace("서울시 12 Sample Lane", "")), false);
   assert.equal(dropKoreanNames(analysis, EMPTY_FACTS).dropped, false);
+});
+
+test("Korean answers never reach the letter, even when translation fails", () => {
+  const analysis = { ...classifyByRules(SAMPLE_LETTER), serviceDenied: "입원 재활" };
+  const facts = {
+    ...EMPTY_FACTS,
+    whyNeeded: "어머니는 혼자 사십니다.",
+    whatTried: "집에서 운동을 했습니다.",
+    harmIfDelayed: "넘어질 위험이 큽니다.",
+    mailingAddress: "12 Sample Lane",
+  };
+  // Only one of the four Korean fields came back translated.
+  const partial = applyTranslations(analysis, facts, { whatTried: "Exercises at home." });
+  const safe = blankUntranslated(partial.analysis, partial.facts);
+  assert.deepEqual(safe.blanked.sort(), ["harmIfDelayed", "serviceDenied", "whyNeeded"]);
+
+  const letter = buildLetter({ analysis: safe.analysis, facts: safe.facts, today: "2026-11-22" });
+  assert.equal(hasHangul(letter), false);
+  assert.match(letter, /\[WRITE IN ENGLISH: WHY THIS CARE IS NEEDED\]/);
+  assert.match(letter, /Treatments and steps already tried: Exercises at home\./);
+  assert.match(letter, /\[WRITE IN ENGLISH: WHAT HAPPENS IF THIS CARE IS DELAYED\]/);
+  assert.match(letter, /Service denied: \[THE SERVICE OR ITEM THAT WAS DENIED\]/);
+
+  // Nothing Korean: nothing is touched.
+  const english = blankUntranslated(classifyByRules(SAMPLE_LETTER), { ...EMPTY_FACTS, whyNeeded: "She lives alone." });
+  assert.deepEqual(english.blanked, []);
+  assert.equal(english.facts.whyNeeded, "She lives alone.");
+});
+
+test("model failures are sorted into causes the site owner can act on", () => {
+  const err = (status: number, message: string) => Object.assign(new Error(message), { status });
+  assert.equal(classifyModelError(err(401, "invalid x-api-key")), "auth");
+  assert.equal(classifyModelError(err(400, "Your credit balance is too low to access the API")), "billing");
+  assert.equal(classifyModelError(err(404, "model: claude-nope")), "model");
+  assert.equal(classifyModelError(err(429, "rate limited")), "rate_limit");
+  assert.equal(classifyModelError(new Error("socket hang up")), "other");
 });

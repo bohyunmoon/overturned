@@ -35,6 +35,34 @@ export function applyTranslations(
   };
 }
 
+/** What the letter shows in place of an answer that could not be translated. */
+const UNTRANSLATED: Record<TranslatableKey, string> = {
+  whyNeeded: "[WRITE IN ENGLISH: WHY THIS CARE IS NEEDED]",
+  whatTried: "[WRITE IN ENGLISH: WHAT HAS ALREADY BEEN TRIED]",
+  harmIfDelayed: "[WRITE IN ENGLISH: WHAT HAPPENS IF THIS CARE IS DELAYED]",
+  lateReason: "[WRITE IN ENGLISH: WHY THE APPEAL IS LATE]",
+  serviceDenied: "", // the letter template supplies its own blank
+};
+
+/**
+ * The letter goes to a US health plan and must be English. Any answer that
+ * is still Korean after translation is replaced with a loud fill-in blank,
+ * so Korean text never reaches the letter.
+ */
+export function blankUntranslated(
+  analysis: DenialAnalysis,
+  facts: UserFacts,
+): { analysis: DenialAnalysis; facts: UserFacts; blanked: TranslatableKey[] } {
+  const blanked = Object.keys(koreanFields(analysis, facts)) as TranslatableKey[];
+  const f = { ...facts };
+  for (const k of TRANSLATED_FACTS) if (blanked.includes(k)) f[k] = UNTRANSLATED[k];
+  return {
+    analysis: blanked.includes("serviceDenied") ? { ...analysis, serviceDenied: UNTRANSLATED.serviceDenied } : analysis,
+    facts: f,
+    blanked,
+  };
+}
+
 const NAME_FACTS = ["patientName", "representativeName", "doctorName"] as const;
 const NAME_DETAILS = ["planName", "memberName", "providerName"] as const;
 
